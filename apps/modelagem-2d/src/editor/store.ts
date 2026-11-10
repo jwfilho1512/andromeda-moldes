@@ -24,6 +24,15 @@ export interface ToolOpts {
   dartWidth: number;
   cutSeam: number;
   pleatDepth: number;
+  /** Prega: faca, macho ou fêmea. */
+  pleatKind: 'faca' | 'macho' | 'femea';
+  /** Prega faca: 1 = deita para um lado, -1 = para o outro. */
+  pleatDir: 1 | -1;
+  /** Prega em leque: profundidade diferente na ponta do 2º clique. */
+  pleatTaper: boolean;
+  pleatDepthEnd: number;
+  /** Acertar o bico da prega na costura. */
+  pleatTrue: boolean;
   spreadMm: number;
   notchDepth: number;
   /** Valor aplicado pela ferramenta Margem de costura. */
@@ -134,7 +143,7 @@ export const editor = new Store<EditorState>({
   past: [],
   future: [],
   message: null,
-  opts: { dartWidth: 30, cutSeam: 0, pleatDepth: 30, spreadMm: 40, notchDepth: 5, seamMm: 10, seamHem: false, parallelMm: 10, measureMode: 'clique', measureDistMm: 50, divideN: 2, rotateDeg: 15 },
+  opts: { dartWidth: 30, cutSeam: 0, pleatDepth: 30, pleatKind: 'faca', pleatDir: 1, pleatTaper: false, pleatDepthEnd: 50, pleatTrue: true, spreadMm: 40, notchDepth: 5, seamMm: 10, seamHem: false, parallelMm: 10, measureMode: 'clique', measureDistMm: 50, divideN: 2, rotateDeg: 15 },
   snap: { ponto: true, meio: true, intersecao: true, perpendicular: true, borda: true, alinhamento: true, guias: true },
   theme: loadTheme(),
   unit: loadUnit(),

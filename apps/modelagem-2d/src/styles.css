@@ -132,7 +132,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 }
 .cb-tool { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); white-space: nowrap; }
 .cb-options { display: flex; align-items: center; gap: 8px; }
-.cb-options .row { gap: 8px; padding: 0; }
+.cb-options .row { gap: 8px; padding: 0; white-space: nowrap; }
+.cb-options label.check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.cb-options .muted { white-space: nowrap; }
 .cb-name { font-weight: 600; margin-right: 4px; }
 .cb-group { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; border-left: 1px solid var(--line); }
 .cb-group button.icon { width: 28px; height: 28px; }

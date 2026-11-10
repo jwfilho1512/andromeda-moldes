@@ -225,7 +225,7 @@ const TOOL_WORDS: Record<string, string> = {
   join: 'unir juntar colar moldes',
   fold: 'dobrar meio dobra',
   unfold: 'desdobrar abrir dobra molde inteiro espelhar centro',
-  pleat: 'prega prega macho pregueado',
+  pleat: 'prega pregas macho femea faca leque evase bico pregueado plissado',
   spread: 'folga abrir paralela aumentar largura',
   spreadRadial: 'folga leque evase godê rodado abrir',
   walk: 'andar molde conferir costura bater medida piques',

@@ -19,6 +19,8 @@ import {
   notchGeometry,
   pathLength,
   pathThroughPoints,
+  pleatPiece,
+  polyline,
   rect,
   reversePiece,
   signedArea,
@@ -151,6 +153,53 @@ describe('prega e folgas', () => {
     const waistLen = pathLength(s.outline);
     expect(waistLen).toBeGreaterThan(2000);
     expect(area(s)).toBeGreaterThan(400 * 600);
+  });
+});
+
+describe('prega (faca, macho/fêmea, leque, bico)', () => {
+  const near = (p: Piece, q: { x: number; y: number }) => vertices(p.outline).some((x) => dist(x, q) < 1e-6);
+  /** Bloco com a cintura inclinada: de (400,600) até (0,500). */
+  const slanted = () => createPiece('s', 'Inclinado', polyline([v(0, 0), v(400, 0), v(400, 600), v(0, 500)], true));
+
+  it('faca reta: abre 2× a profundidade, marca 2 linhas, 4 piques e a seta', () => {
+    const s = pleatPiece(block(), { edge: 0, t: 0.5 }, { edge: 2, t: 0.5 }, { depth: 30 });
+    expect(box(s).w).toBeCloseTo(460, 6);
+    expect(area(s)).toBeCloseTo(460 * 600, 3);
+    expect(s.notches).toHaveLength(4);
+    expect(s.internals).toHaveLength(4); // 2 linhas + seta (haste e ponta)
+  });
+
+  it('macho/fêmea: abre 4× a profundidade, com linha do centro e duas setas', () => {
+    const s = pleatPiece(block(), { edge: 0, t: 0.5 }, { edge: 2, t: 0.5 }, { depth: 25, kind: 'femea' });
+    expect(box(s).w).toBeCloseTo(500, 6);
+    expect(s.notches).toHaveLength(6);
+    expect(s.internals).toHaveLength(7);
+    expect(s.notes).toMatch(/fêmea/);
+  });
+
+  it('bico: com a cintura inclinada, a ponte segue a costura da prega fechada', () => {
+    // Lado que abre = esquerdo (vai para -x). A prega fechada fica sobre a costura original y = 500 + x/4.
+    const s = pleatPiece(slanted(), { edge: 0, t: 0.5 }, { edge: 2, t: 0.5 }, { depth: 30 });
+    expect(near(s, v(170, 542.5))).toBe(true);
+    const inv = pleatPiece(slanted(), { edge: 0, t: 0.5 }, { edge: 2, t: 0.5 }, { depth: 30, dir: -1 });
+    expect(near(inv, v(170, 557.5))).toBe(true);
+    // macho: dobras em -D, 0 e +D da linha → bicos dos dois lados e centro na reta
+    const m = pleatPiece(slanted(), { edge: 0, t: 0.5 }, { edge: 2, t: 0.5 }, { depth: 30, kind: 'macho' });
+    expect(near(m, v(170, 557.5))).toBe(true);
+    expect(near(m, v(140, 550))).toBe(true);
+    expect(near(m, v(110, 542.5 + 15))).toBe(false);
+    expect(near(m, v(110, 542.5))).toBe(true);
+    // sem acerto, a borda fica reta
+    const flat = pleatPiece(slanted(), { edge: 0, t: 0.5 }, { edge: 2, t: 0.5 }, { depth: 30, trueEdge: false });
+    expect(near(flat, v(170, 550))).toBe(true);
+  });
+
+  it('em leque: cada ponta abre a sua profundidade', () => {
+    const s = pleatPiece(block(), { edge: 0, t: 0.5 }, { edge: 2, t: 0.5 }, { depth: 20, depthEnd: 40 });
+    const [l0, l1] = s.internals as [import('../src/index.js').Path, import('../src/index.js').Path];
+    const end = (p: import('../src/index.js').Path) => p.segments[0]!.to;
+    expect(dist(l0.start, l1.start)).toBeCloseTo(40, 6);
+    expect(dist(end(l0), end(l1))).toBeCloseTo(80, 6);
   });
 });
 

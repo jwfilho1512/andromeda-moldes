@@ -61,7 +61,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'join', label: 'Unir moldes', key: 'J', group: 'Moldes', icon: IconArrowsJoin, hint: '1) clique a borda do molde A · 2) clique a borda do molde B que costura nela' },
   { id: 'fold', label: 'Dobrar molde', key: 'F', group: 'Moldes', icon: IconFold, hint: '1) e 2) clique os dois pontos da linha de dobra · 3) clique a metade que fica' },
   { id: 'unfold', label: 'Desdobrar molde', key: 'U', group: 'Moldes', icon: IconFlipHorizontal, hint: 'Clique na borda reta que está na dobra (ex.: centro frente)' },
-  { id: 'pleat', label: 'Prega', key: 'Q', group: 'Moldes', icon: IconLayoutDistributeVertical, hint: '1) e 2) clique as duas pontas da linha da prega · profundidade na barra de controle' },
+  { id: 'pleat', label: 'Prega', key: 'Q', group: 'Moldes', icon: IconLayoutDistributeVertical, hint: '1) e 2) clique as duas pontas da linha da prega · tipo (faca, macho, fêmea), sentido, leque e bico na barra de controle' },
   { id: 'spread', label: 'Abrir folga paralela', key: 'O', group: 'Moldes', icon: IconArrowsHorizontal, hint: '1) e 2) clique as pontas da linha de abertura · valor na barra de controle' },
   { id: 'walk', label: 'Andar molde', key: 'W', group: 'Moldes', icon: IconWalk, hint: '1) clique a costura do molde A perto do início · 2) clique a costura do molde B perto do mesmo início · mova o mouse ao longo da costura · clique pausa · setas ±1 mm (Shift 10) · N = próximo pique/canto · Esc sai' },
   { id: 'spreadRadial', label: 'Abrir folga em leque', key: 'L', group: 'Moldes', icon: IconChartArcs, hint: '1) clique onde abre (ex.: barra) · 2) clique o pivô (ex.: cintura) · valor na barra de controle' },

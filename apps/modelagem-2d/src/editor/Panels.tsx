@@ -326,7 +326,31 @@ export function ControlBar() {
       options = <Row label="Margem na borda do corte"><NumberField value={o.cutSeam} min={0} digits={1} onCommit={(v) => setOpt('cutSeam', v)} width={64} /></Row>;
       break;
     case 'pleat':
-      options = <Row label="Profundidade da prega"><NumberField value={o.pleatDepth} min={1} digits={1} onCommit={(v) => setOpt('pleatDepth', v)} width={64} /></Row>;
+      options = (
+        <>
+          <span className="seg" data-help="ctrl:pleatKind">
+            {(['faca', 'macho', 'femea'] as const).map((k) => (
+              <button key={k} className={o.pleatKind === k ? 'on' : ''} onClick={() => setOpt('pleatKind', k)}>
+                {k === 'faca' ? 'Faca' : k === 'macho' ? 'Macho' : 'Fêmea'}
+              </button>
+            ))}
+          </span>
+          <Row label={o.pleatTaper ? 'Prof. 1º ponto' : 'Profundidade'}><NumberField value={o.pleatDepth} min={1} digits={1} onCommit={(v) => setOpt('pleatDepth', v)} width={64} /></Row>
+          {o.pleatTaper && <Row label="2º ponto"><NumberField value={o.pleatDepthEnd} min={1} digits={1} onCommit={(v) => setOpt('pleatDepthEnd', v)} width={64} /></Row>}
+          <label className="check" title="Prega mais funda numa ponta que na outra (saia evasê)">
+            <input type="checkbox" checked={o.pleatTaper} onChange={(e) => setOpt('pleatTaper', e.target.checked)} /> Em leque
+          </label>
+          {o.pleatKind === 'faca' && (
+            <button className="ghost" title="Troca o lado para onde a prega deita" onClick={() => setOpt('pleatDir', o.pleatDir === 1 ? -1 : 1)}>
+              Sentido {o.pleatDir === 1 ? '←' : '→'}
+            </button>
+          )}
+          <label className="check" title="Recorta a borda como se a prega estivesse fechada, para a costura ficar contínua">
+            <input type="checkbox" checked={o.pleatTrue} onChange={(e) => setOpt('pleatTrue', e.target.checked)} /> Acertar bico
+          </label>
+          <span className="muted">consome {fmtLen(o.pleatDepth * (o.pleatKind === 'faca' ? 2 : 4))}{o.pleatTaper ? `→${fmtLen(o.pleatDepthEnd * (o.pleatKind === 'faca' ? 2 : 4))}` : ''} {unitLabel()}</span>
+        </>
+      );
       break;
     case 'spread':
     case 'spreadRadial':

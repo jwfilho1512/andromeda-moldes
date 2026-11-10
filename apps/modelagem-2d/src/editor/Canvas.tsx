@@ -24,6 +24,7 @@ import {
   rect,
   removePieceVertex,
   spreadParallel,
+  pleatPiece,
   spreadRadial,
   toggleCurve,
   transferDart,
@@ -60,7 +61,7 @@ import {
 } from '@cad-textil/core';
 import { smartSnap } from './snapEngine';
 import { type Overlay, type View, pieceGeom, pointInPolygon, render, setCanvasTheme, toScreen, toWorld } from './render';
-import { type Tool, commit, commitPiece, coordStore, editor, fmtLenU, endLive, liveUpdate, newId, notify, replacePieces, select, selectMany, selectedIds, selectedPiece, toggleSelected, viewInfo, walkStore, withHem } from './store';
+import { type Tool, commit, commitPiece, coordStore, editor, fmtLen, fmtLenU, endLive, liveUpdate, newId, notify, replacePieces, select, selectMany, selectedIds, selectedPiece, toggleSelected, viewInfo, walkStore, withHem } from './store';
 import { addPieceFromOutline, deleteSelection, nudge, setTool } from './actions';
 import { RULER } from './render';
 import { getPxPerMm } from './calibration';
@@ -483,8 +484,13 @@ export function Canvas() {
           commitPiece(piece.id, (p) => foldPiece(p, a, b, keep));
           notify('Molde dobrado — a linha de dobra ficou sem margem');
         } else if (tool === 'pleat') {
-          commitPiece(piece.id, (p) => spreadParallel(p, a, b, opts().pleatDepth * 2, true));
-          notify(`Prega de ${fmtLenU(opts().pleatDepth)} de profundidade (abertura ${fmtLenU(opts().pleatDepth * 2)})`);
+          const o = opts();
+          const k = o.pleatKind === 'faca' ? 2 : 4;
+          const end = o.pleatTaper ? o.pleatDepthEnd : o.pleatDepth;
+          commitPiece(piece.id, (p) => pleatPiece(p, a, b, { depth: o.pleatDepth, depthEnd: end, kind: o.pleatKind, dir: o.pleatDir, trueEdge: o.pleatTrue }));
+          const name = o.pleatKind === 'faca' ? 'Prega faca' : o.pleatKind === 'macho' ? 'Prega macho' : 'Prega fêmea';
+          const depth = o.pleatTaper ? `${fmtLen(o.pleatDepth)}→${fmtLenU(end)}` : fmtLenU(o.pleatDepth);
+          notify(`${name} de ${depth} de profundidade (consome ${o.pleatTaper ? `${fmtLen(o.pleatDepth * k)}→${fmtLenU(end * k)}` : fmtLenU(o.pleatDepth * k)})${o.pleatTrue ? ' · bico acertado' : ''}`);
         } else if (tool === 'spread') {
           commitPiece(piece.id, (p) => spreadParallel(p, a, b, opts().spreadMm));
           notify(`Folga de ${fmtLenU(opts().spreadMm)} aberta`);

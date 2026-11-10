@@ -477,6 +477,174 @@ export function spreadParallel(piece: Piece, a: EdgeHit, b: EdgeHit, amountMm: n
   return build(p, verts, edges, carry);
 }
 
+export type PleatKind = 'faca' | 'macho' | 'femea';
+
+export interface PleatOpts {
+  /** Profundidade (mm) na ponta do 1º clique. Prega faca consome 2×, macho/fêmea 4×. */
+  depth: number;
+  /** Profundidade na ponta do 2º clique (prega em leque). Igual a `depth` se omitida. */
+  depthEnd?: number;
+  kind?: PleatKind;
+  /** Prega faca: 1 = a linha do lado que abre é levada até a linha original; -1 = o contrário (a prega deita para o outro lado). */
+  dir?: 1 | -1;
+  /** Acerta a costura com a prega fechada (bico). Padrão: sim. */
+  trueEdge?: boolean;
+}
+
+/** Linha poligonal da costura saindo do vértice `i` (sentido +1 = para frente no contorno). */
+function sideLine(d: Decomposed, i: number, step: 1 | -1, stop: number): Vec2[] {
+  const n = d.verts.length;
+  const out: Vec2[] = [d.verts[i]!];
+  let k = i;
+  for (let c = 0; c < 4 && c < n - 1; c++) {
+    const j = (k + step + n) % n;
+    const e = step === 1 ? d.edges[k]! : reverseEdge(d.edges[j]!);
+    const pts = flattenPath(compose({ verts: [d.verts[k]!, d.verts[j]!], edges: [e], closed: false }), 0.02);
+    out.push(...pts.slice(1));
+    if (j === stop) break;
+    k = j;
+  }
+  return out;
+}
+
+/**
+ * Onde a costura passa a uma distância `h` (ao longo de `w`) da linha da prega: devolve a coordenada
+ * ao longo de `uL`. Segue a borda de verdade (curva inclusa); se ela acabar antes, prolonga a última reta.
+ */
+function seamAt(O: Vec2, w: Vec2, uL: Vec2, line: Vec2[], h: number, sgn: number): number {
+  const H = (p: Vec2) => dot(sub(p, O), w) * sgn;
+  for (let i = 0; i + 1 < line.length; i++) {
+    const p = line[i]!, q = line[i + 1]!;
+    const hp = H(p), hq = H(q);
+    if (hq >= h && hq > hp) {
+      const t = (h - hp) / (hq - hp);
+      return dot(sub(lerp(p, q, t), O), uL);
+    }
+  }
+  const last = line[line.length - 1]!;
+  const prev = line.length > 2 ? line[line.length - 2]! : O;
+  const dh = H(last) - H(prev);
+  if (Math.abs(dh) < 1e-9) return dot(sub(last, O), uL);
+  const slope = (dot(sub(last, O), uL) - dot(sub(prev, O), uL)) / dh;
+  return dot(sub(last, O), uL) + slope * (h - H(last));
+}
+
+/**
+ * Prega (como no Audaces): abre o molde pela reta a→b e marca linhas, piques e setas de sentido.
+ *  - faca: consome 2× a profundidade; linha da dobra leva até a linha de colocação.
+ *  - macho / fêmea: consome 4×; as duas linhas externas se encontram na linha do centro
+ *    (fêmea = encontro pelo direito; macho = pelo avesso).
+ *  - em leque: profundidades diferentes em cada ponta (o lado gira em vez de deslizar).
+ *  - bico: a borda que atravessa a prega é recortada como se a prega estivesse fechada,
+ *    para que a costura fique contínua depois de dobrada.
+ */
+export function pleatPiece(piece: Piece, a: EdgeHit, b: EdgeHit, o: PleatOpts): Piece {
+  const kind = o.kind ?? 'faca';
+  const k = kind === 'faca' ? 2 : 4;
+  const dA = o.depth, dB = o.depthEnd ?? o.depth;
+  if (!(dA > 0) || !(dB > 0)) throw new Error('A profundidade da prega precisa ser maior que zero');
+  const { piece: p, indices } = insertPoints(piece, [a, b]);
+  const [ia, ib] = indices as [number, number];
+  if (ia === ib) throw new Error('Clique dois pontos diferentes para a linha da prega');
+  const d = decompose(p.outline);
+  const n = d.verts.length;
+  const A = d.verts[ia]!, B = d.verts[ib]!;
+  const sideB = chain(d, p, 'A', ib, ia).verts;
+  const u = normalize(sub(B, A));
+  let nrm = { x: -u.y, y: u.x };
+  if (dot(sub(centroid(sideB), A), nrm) < 0) nrm = scale(nrm, -1);
+
+  // Movimento do lado B: desliza (prega reta) ou gira em torno de um pivô na reta AB (prega em leque).
+  const oA = k * dA, oB = k * dB;
+  let move: Fn;
+  if (Math.abs(oA - oB) < 1e-9) move = translateBy(scale(nrm, oA));
+  else {
+    const P = lerp(A, B, oA / (oA - oB));
+    const R = dist(P, A);
+    if (oA >= 2 * R) throw new Error('Diferença de profundidade grande demais para o comprimento da prega');
+    const th = 2 * Math.asin(oA / (2 * R));
+    const r1 = rotateAbout(P, th);
+    move = dot(sub(r1(A), A), nrm) > 0 ? r1 : rotateAbout(P, -th);
+  }
+
+  // Dobra: posição (com a prega fechada) de cada ponto da faixa aberta, s ∈ [0, abertura].
+  const dir = o.dir ?? 1;
+  const folds = (D: number): { s: number; x: number }[] =>
+    kind === 'faca'
+      ? [{ s: D, x: dir * D }]
+      : [{ s: D, x: -D }, { s: 2 * D, x: 0 }, { s: 3 * D, x: D }];
+  /** Pontos da ponte (borda que atravessa a prega) numa ponta, em ordem de s crescente (sem as pontas). */
+  const bridge = (O: Vec2, Om: Vec2, D: number, lineB: Vec2[], lineA: Vec2[]): { s: number; p: Vec2 }[] => {
+    const open = dist(O, Om);
+    const w = scale(sub(Om, O), 1 / open);
+    let uL = { x: -w.y, y: w.x };
+    if (dot(uL, u) < 0) uL = scale(uL, -1);
+    const sc = open / (k * D); // = 1 na prega reta
+    return folds(D).map(({ s, x }) => {
+      const t = o.trueEdge === false || Math.abs(x) < 1e-9 ? 0 : seamAt(O, w, uL, x > 0 ? lineB : lineA, Math.abs(x) * sc, x > 0 ? 1 : -1);
+      return { s: s * sc, p: add(add(O, scale(w, s * sc)), scale(uL, t)) };
+    });
+  };
+  const brA = bridge(A, move(A), dA, sideLine(d, ia, -1, ib), sideLine(d, ia, 1, ib));
+  const brB = bridge(B, move(B), dB, sideLine(d, ib, 1, ia), sideLine(d, ib, -1, ia));
+
+  const partA = chain(d, p, 'A', ia, ib);
+  const partB = chain(d, p, 'A', ib, ia, move);
+  const sB = seamOf(p, ib), sA = seamOf(p, (ia - 1 + n) % n);
+  const line = (): EdgeData => ({ kind: 'line' });
+  const verts = [...partA.verts, ...brB.map((q) => q.p), ...partB.verts, ...[...brA].reverse().map((q) => q.p)];
+  const edges: NewEdge[] = [
+    ...partA.edges,
+    ...[...brB, null].map((_, j) => ({ data: line(), ...sB, from: `prega-b${j}` })),
+    ...partB.edges,
+    ...[...brA, null].map((_, j) => ({ data: line(), ...sA, from: `prega-a${j}` })),
+  ];
+
+  const bSet = edgesInChain(n, ib, ia);
+  const cb = chain(d, p, 'A', ib, ia);
+  const polyB = flattenPath(compose({ verts: cb.verts, edges: [...cb.edges.map((x) => x.data), { kind: 'line' }], closed: true }));
+  const carry = collect(p, 'A', { f: (e) => (bSet.has(e) ? move : ID), internals: null });
+  carry.internals = p.internals.map((path) => (pointInPolygon(flattenPath(path)[0]!, polyB) ? mapPath(path, move) : path));
+  carry.drills = (p.drills ?? []).map((q) => (pointInPolygon(q, polyB) ? move(q) : q));
+
+  // Marcação: linhas (0 e abertura; + centro na macho/fêmea), piques nas pontas e setas de sentido.
+  const marks: [Vec2, Vec2][] = [[A, B], [move(A), move(B)]];
+  if (kind !== 'faca') marks.splice(1, 0, [brA[1]!.p, brB[1]!.p]);
+  for (const [p1, p2] of marks) {
+    carry.internals.push({ start: p1, segments: [{ kind: 'line', to: p2 }], closed: false });
+    carry.notches.push({ p: p1, depth: 5 }, { p: p2, depth: 5 });
+  }
+  /** Ponto a 30% da altura da prega (longe do nome do molde, que fica no meio), numa fração f da abertura. */
+  const mid = (f: number) => lerp(lerp(A, move(A), f), lerp(B, move(B), f), 0.3);
+  const arrow = (f0: number, f1: number) => {
+    const tail = mid(f0), tip = mid(f1);
+    const len = dist(tail, tip);
+    if (len < 1e-6) return;
+    const v = scale(sub(tip, tail), 1 / len);
+    const hl = Math.min(6, len * 0.4);
+    const back = sub(tip, scale(v, hl));
+    const side = scale({ x: -v.y, y: v.x }, hl * 0.5);
+    carry.internals.push(
+      { start: tail, segments: [{ kind: 'line', to: tip }], closed: false },
+      { start: add(back, side), segments: [{ kind: 'line', to: tip }, { kind: 'line', to: sub(back, side) }], closed: false },
+    );
+  };
+  if (kind === 'faca') {
+    // dir 1: a linha da abertura (lado B) é levada até a linha do 1º lado; -1: o contrário.
+    if (dir === 1) arrow(0.9, 0.1);
+    else arrow(0.1, 0.9);
+  } else {
+    arrow(0.05, 0.45);
+    arrow(0.95, 0.55);
+  }
+  const fmt = (mm: number) => `${(mm / 10).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} cm`;
+  const note =
+    kind === 'faca'
+      ? undefined
+      : `Prega ${kind === 'macho' ? 'macho' : 'fêmea'} de ${fmt(dA)}${dB !== dA ? `–${fmt(dB)}` : ''}: unir as linhas externas na linha do centro pelo ${kind === 'macho' ? 'avesso' : 'direito'}.`;
+  return build(p, verts, edges, carry, note ? { notes: [p.notes, note].filter(Boolean).join(' ') } : {});
+}
+
 /**
  * Abre folga em leque: corta de `open` até o pivô `pivot` (na outra borda) e gira um dos lados
  * em torno do pivô até abrir `amountMm` na borda de `open`.
