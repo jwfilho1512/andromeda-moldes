@@ -5,5 +5,8 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "dependencies": { "@cad-textil/core": "*" }
+  "dependencies": {
+    "@cad-textil/core": "*"
+  },
+  "license": "MIT"
 }

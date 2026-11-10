@@ -103,3 +103,15 @@ npm run icons -w @cad-textil/modelagem-2d      # regera os ícones a partir de b
 5. Ficha técnica e costuras (ligação entre bordas de moldes)
 6. Matriz 3D: avatar, montagem, simulação de tecido, sincronia 2D↔3D
 7. Hub
+
+## Contribuir
+
+O Andromeda Moldes é **código aberto (licença MIT)**: qualquer pessoa pode usar, estudar, modificar e redistribuir, inclusive em uso comercial, mantendo o aviso de licença.
+
+- Achou um problema ou tem uma ideia? Abra uma **[Issue](../../issues)** contando o que fez e o que esperava (uma foto da tela ajuda).
+- Quer mexer no código? Faça um fork, crie um branch, rode `npm install` e `npm test`, e mande um **Pull Request**. Os testes de precisão (escala 1:1) precisam continuar passando.
+- Tudo por dentro é em milímetros; textos da interface em português do Brasil.
+
+## Licença
+
+[MIT](LICENSE) © 2026 Joao Wellington e colaboradores.
