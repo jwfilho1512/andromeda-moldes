@@ -1,7 +1,7 @@
-# Gera os instaladores do Andromeda Moldes (Mac e Windows) e publica na página de Releases.
+# Gera os instaladores do Andromeda Fashion Studio (hub, Draw e Moldes, Mac e Windows) e publica em Releases.
 #
 # Como lançar uma versão:
-#   1. mude "version" em apps/modelagem-2d/package.json (ex.: 0.2.0)
+#   1. mude "version" em apps/modelagem-2d, apps/draw e apps/hub (package.json), ex.: 0.2.0
 #   2. git tag v0.2.0 && git push --tags
 # Também dá para rodar à mão em Actions › "Instaladores" › Run workflow (gera os arquivos sem publicar).
 name: Instaladores
@@ -20,14 +20,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            script: dist:mac
-            files: |
-              apps/modelagem-2d/release/*.dmg
-          - os: windows-latest
-            script: dist:win
-            files: |
-              apps/modelagem-2d/release/*.exe
+          - { os: macos-latest, app: modelagem-2d, script: dist:mac, ext: dmg }
+          - { os: windows-latest, app: modelagem-2d, script: dist:win, ext: exe }
+          - { os: macos-latest, app: draw, script: dist:mac, ext: dmg }
+          - { os: windows-latest, app: draw, script: dist:win, ext: exe }
+          - { os: macos-latest, app: hub, script: dist:mac, ext: dmg }
+          - { os: windows-latest, app: hub, script: dist:win, ext: exe }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -41,18 +39,18 @@ jobs:
         run: npm ci
 
       - name: Testes
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && matrix.app == 'modelagem-2d'
         run: npm test
 
       - name: Gerar instalador
-        run: npm run ${{ matrix.script }} -w @cad-textil/modelagem-2d
+        run: npm run ${{ matrix.script }} -w @cad-textil/${{ matrix.app }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: instalador-${{ matrix.os }}
-          path: ${{ matrix.files }}
+          name: instalador-${{ matrix.app }}-${{ matrix.os }}
+          path: apps/${{ matrix.app }}/release/*.${{ matrix.ext }}
           if-no-files-found: error
 
   release:
@@ -71,13 +69,23 @@ jobs:
           files: instaladores/*
           generate_release_notes: true
           body: |
-            ## Baixar o Andromeda Moldes
+            ## Baixar o Andromeda Fashion Studio
 
-            | Sistema | Arquivo |
+            **Jeito mais fácil:** baixe só o **hub** (`Andromeda-Fashion-Studio-…`) e instale/atualize o Draw e o Moldes por ele.
+
+            | Sistema | Hub (recomendado) |
             |---|---|
-            | Mac com chip Apple (M1, M2, M3…) | `Andromeda-Moldes-…-mac-arm64.dmg` |
-            | Mac Intel | `Andromeda-Moldes-…-mac-x64.dmg` |
-            | Windows 10/11 | `Andromeda-Moldes-…-windows-instalador.exe` |
+            | Mac com chip Apple (M1, M2, M3…) | `Andromeda-Fashion-Studio-…-mac-arm64.dmg` |
+            | Mac Intel | `Andromeda-Fashion-Studio-…-mac-x64.dmg` |
+            | Windows 10/11 | `Andromeda-Fashion-Studio-…-windows-instalador.exe` |
+
+            Ou baixe os apps separados:
+
+            | Sistema | Andromeda Moldes (modelagem, risco) | Andromeda Draw (desenho e ficha técnica) |
+            |---|---|---|
+            | Mac com chip Apple (M1, M2, M3…) | `Andromeda-Moldes-…-mac-arm64.dmg` | `Andromeda-Draw-…-mac-arm64.dmg` |
+            | Mac Intel | `Andromeda-Moldes-…-mac-x64.dmg` | `Andromeda-Draw-…-mac-x64.dmg` |
+            | Windows 10/11 | `Andromeda-Moldes-…-windows-instalador.exe` | `Andromeda-Draw-…-windows-instalador.exe` |
 
             **Mac:** abra o .dmg e arraste o app para Aplicativos. Na primeira vez, clique com o botão direito no app › **Abrir** (o app não tem assinatura paga da Apple).
             **Windows:** se aparecer a tela azul do SmartScreen, clique em **Mais informações › Executar assim mesmo**.

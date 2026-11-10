@@ -1,23 +1,41 @@
 <p align="center"><img src="apps/modelagem-2d/build/icon.png" width="120" alt="Andromeda Moldes"></p>
 
-<h1 align="center">Andromeda Moldes</h1>
+<h1 align="center">Andromeda Fashion Studio</h1>
 
-<p align="center">Modelagem 2D, graduação, estampa, risco e encaixe para confecção — no Mac e no Windows, em português.</p>
+<p align="center">Programas livres para confecção, no Mac e no Windows, em português:<br>
+<b>Andromeda Draw</b> (desenho de moda e ficha técnica) · <b>Andromeda Moldes</b> (modelagem 2D, graduação, estampa, risco e encaixe) · Andromeda 3D (em breve)</p>
 
 ## Baixar
 
-Vá em **[Releases](../../releases/latest)** e baixe o arquivo do seu computador:
+Vá em **[Releases](../../releases/latest)**. O jeito mais fácil é baixar só o **hub Andromeda Fashion Studio** (`Andromeda-Fashion-Studio-…`): por ele você instala, atualiza e abre o Draw e o Moldes, e organiza os produtos (cada referência com o desenho, a ficha e os moldes ligados).
 
-| Sistema | Arquivo |
-|---|---|
-| Mac com chip Apple (M1, M2, M3…) | `Andromeda-Moldes-…-mac-arm64.dmg` |
-| Mac Intel | `Andromeda-Moldes-…-mac-x64.dmg` |
-| Windows 10/11 | `Andromeda-Moldes-…-windows-instalador.exe` |
+Ou baixe os apps separados:
+
+| Sistema | Andromeda Moldes | Andromeda Draw |
+|---|---|---|
+| Mac com chip Apple (M1, M2, M3…) | `Andromeda-Moldes-…-mac-arm64.dmg` | `Andromeda-Draw-…-mac-arm64.dmg` |
+| Mac Intel | `Andromeda-Moldes-…-mac-x64.dmg` | `Andromeda-Draw-…-mac-x64.dmg` |
+| Windows 10/11 | `Andromeda-Moldes-…-windows-instalador.exe` | `Andromeda-Draw-…-windows-instalador.exe` |
 
 - **Mac:** abra o `.dmg` e arraste o app para **Aplicativos**. Na primeira vez, clique com o **botão direito › Abrir** (o app ainda não tem assinatura paga da Apple).
 - **Windows:** se aparecer a tela azul do SmartScreen, clique em **Mais informações › Executar assim mesmo**.
 
-## O que ele faz
+## Hub — Andromeda Fashion Studio
+
+- **Apps:** instala o Draw e o Moldes com um clique (baixa a versão certa para Mac com chip Apple, Mac Intel ou Windows), avisa quando há versão nova e abre cada app.
+- **Produtos:** uma pasta de trabalho com as referências. "Nova referência" cria a pasta do produto com o desenho (`.adraw`) e os moldes (`.ctx`) já vinculados; cada linha abre o desenho no Draw e os moldes no Moldes.
+
+## Andromeda Draw — desenho de moda e ficha técnica
+
+- **Desenho vetorial** inspirado no Illustrator: seleção, seleção direta (pontos e alças), caneta com curvas, linha, retângulo, elipse, texto, camadas, agrupar, desfazer.
+- **Simetria:** desenhe metade da peça e o outro lado acompanha; meio contorno que fecha no eixo vira a peça inteira.
+- **Pespontos que acompanham o traço:** simples, duplo, triplo, zigue-zague, galoneira, overloque, corrente, alinhavo, zíper, franzido e elástico — com distância da borda e entre agulhas em medidas reais da peça.
+- **Biblioteca:** peças base paramétricas (camiseta, regata, camisa social, moletom, calça jeans 5 bolsos, shorts, saia, vestido — com opções de gola, manga, modelagem e medidas), detalhes (bolsos, golas, punhos, passantes, zíper, cordão), aviamentos (botões, ilhós, rebite, colchete, fivela, etiqueta, cursor…), tecidos como preenchimento (jeans, listras, xadrez, vichy, poá, canelado, tricô, pied-de-poule…) e croquis em 9 cabeças.
+- **Ficha técnica** no mesmo arquivo (`.adraw`): referência, desenho, tabela de medidas por tamanho com tolerância, materiais, aviamentos (contados direto do desenho), sequência operacional, cores, símbolos de cuidado e vínculo com o arquivo de moldes (`.ctx`) — sai em PDF A4.
+- **Importa** SVG do Illustrator, CorelDRAW, Inkscape ou Figma (traços editáveis, com cores, espessuras, grupos e medidas certas), imagens PNG/JPG/WebP (foto da peça-piloto ou esboço para redesenhar por cima) e moldes do Andromeda Moldes (`.ctx`) ou DXF-AAMA, que viram desenho na escala do documento. Dá também para arrastar o arquivo direto para a prancha.
+- **Exporta** SVG (abre no Illustrator, Inkscape, CorelDRAW) e PNG.
+
+## Andromeda Moldes — o que ele faz
 
 - **Moldes:** reta, curvatura, retângulo exato, linhas internas, pences (criar e transferir), cortar, unir, dobrar/desdobrar, pregas, folgas (paralela e em leque), piques, ponto por coordenada, andar molde e conferir costuras.
 - **Margens e barras:** margem por borda e barra com cantos espelhados (mangas, calças, saias).
@@ -30,7 +48,7 @@ Vá em **[Releases](../../releases/latest)** e baixe o arquivo do seu computador
 
 ## Para desenvolvedores
 
-O app é um monorepo (npm workspaces): núcleo de geometria em `packages/core`, bases paramétricas em `packages/bases` e o app desktop (Electron + React + Canvas) em `apps/modelagem-2d`.
+Monorepo (npm workspaces): núcleo de geometria em `packages/core`, bases paramétricas de moldes em `packages/bases`, o Andromeda Moldes (Electron + React + Canvas) em `apps/modelagem-2d`, o Andromeda Draw (Electron + React + SVG) em `apps/draw` e o hub em `apps/hub`.
 
 ## Princípio de exatidão
 
@@ -61,7 +79,12 @@ packages/bases/         biblioteca de bases paramétricas (tamanho M, fem. e mas
   src/superiores.ts     corpo base, manga base, t-shirt, camisa
   src/inferiores.ts     saia reta, calça, bermuda
   src/alfaiataria.ts    paletó/blazer (3 partes, manga 2 partes), terno
-apps/modelagem-2d/      editor desktop (Electron + React + Canvas)
+apps/modelagem-2d/      Andromeda Moldes (Electron + React + Canvas)
+apps/hub/               hub Andromeda Fashion Studio (instala/abre os apps, produtos)
+apps/draw/              Andromeda Draw (Electron + React + SVG)
+  src/model/            documento, simetria, pespontos, tecidos, aviamentos, ficha
+  src/lib/              biblioteca: peças base paramétricas, detalhes, croquis
+  src/ui/               área de desenho, biblioteca, painel, ficha técnica
 ```
 
 ### Bases disponíveis (tamanho M)
@@ -88,9 +111,12 @@ npm run bases     # gera PDF/PLT/CTX de todas as bases em out/bases/
 npm run dev -w @cad-textil/modelagem-2d    # abre o editor desktop
 npm run dist:mac -w @cad-textil/modelagem-2d   # instaladores do Mac em apps/modelagem-2d/release
 npm run icons -w @cad-textil/modelagem-2d      # regera os ícones a partir de build/icon.svg
+npm run dev -w @cad-textil/draw                # abre o Andromeda Draw
+npm run dist:mac -w @cad-textil/draw           # instaladores do Draw em apps/draw/release
+npm run dev -w @cad-textil/hub                 # abre o hub
 ```
 
-**Nova versão:** mude `version` em `apps/modelagem-2d/package.json`, crie a tag (`git tag v0.2.0 && git push --tags`) e o GitHub Actions gera os instaladores de Mac e Windows e publica em Releases.
+**Nova versão:** mude `version` em `apps/modelagem-2d/package.json`, `apps/draw/package.json` e `apps/hub/package.json`, crie a tag (`git tag v0.2.0 && git push --tags`) e o GitHub Actions gera os instaladores de Mac e Windows e publica em Releases.
 
 **Conferência física:** imprima `out/prova-escala.pdf` em "Tamanho real / 100%" ou envie o `.plt` ao plotter. O quadrado deve medir 100 × 100 mm, a régua 500 mm e o retângulo 500 × 200 mm.
 
@@ -100,9 +126,10 @@ npm run icons -w @cad-textil/modelagem-2d      # regera os ícones a partir de b
 2. ✅ Editor Modelagem 2D + biblioteca de bases M, gradação, estampas
 3. ✅ PDF em folhas A4/A3; importar/exportar DXF-AAMA
 4. ✅ Risco e Encaixe v0.2: grade com vários intervalos (encaixe nos vãos), bottom-left com tolerância e antecipação, otimização por busca local (ordem, rotação, tolerância) · próximo: minimização de sobreposição (aproveitamento 80–88%), riscos múltiplos, tecido tubular/listrado
-5. Ficha técnica e costuras (ligação entre bordas de moldes)
-6. Matriz 3D: avatar, montagem, simulação de tecido, sincronia 2D↔3D
-7. Hub
+5. ✅ Andromeda Draw v0.1: desenho técnico com simetria, pespontos, biblioteca e ficha técnica em PDF · próximo: mais peças e detalhes, cotas, variações de cor, consumo puxado do risco
+6. Costuras (ligação entre bordas de moldes)
+7. Andromeda 3D: avatar, montagem, simulação de tecido, sincronia 2D↔3D
+8. ✅ Hub Andromeda Fashion Studio v0.1: instala, atualiza e abre os apps; produtos com desenho, ficha e moldes ligados
 
 ## Contribuir
 

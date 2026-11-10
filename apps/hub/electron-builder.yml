@@ -1,0 +1,45 @@
+# Instaladores do Andromeda Fashion Studio — hub (electron-builder)
+#   Mac:     npm run dist:mac -w @cad-textil/hub   → release/*.dmg (Apple Silicon e Intel)
+#   Windows: npm run dist:win -w @cad-textil/hub   → release/*.exe (melhor gerar no GitHub Actions)
+appId: com.andromedafashion.studio
+productName: Andromeda Fashion Studio
+copyright: Andromeda Fashion Studio
+electronVersion: 45.2.3
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - package.json
+asar: true
+npmRebuild: false
+
+mac:
+  category: public.app-category.graphics-design
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  identity: null
+dmg:
+  title: Andromeda Fashion Studio
+  artifactName: Andromeda-Fashion-Studio-${version}-mac-${arch}.${ext}
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Andromeda Fashion Studio
+  installerLanguages: [pt_BR]
+  language: "1046"
+  artifactName: Andromeda-Fashion-Studio-${version}-windows-instalador.${ext}
