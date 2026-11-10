@@ -1,0 +1,56 @@
+# Instaladores do Andromeda Moldes (electron-builder)
+#   Mac:     npm run dist:mac -w @cad-textil/modelagem-2d   → release/*.dmg (Apple Silicon e Intel)
+#   Windows: npm run dist:win -w @cad-textil/modelagem-2d   → release/*.exe (melhor gerar no GitHub Actions)
+appId: com.andromedamoldes.app
+productName: Andromeda Moldes
+copyright: Andromeda Moldes
+electronVersion: 45.2.3
+
+directories:
+  output: release
+  buildResources: build
+
+# o app já sai inteiro em dist/ (Vite + esbuild); não leva node_modules
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - package.json
+asar: true
+npmRebuild: false
+
+# arquivo de modelagem (.ctx) abre com duplo clique
+fileAssociations:
+  - ext: ctx
+    name: Modelagem Andromeda
+    description: Arquivo de moldes do Andromeda Moldes
+    role: Editor
+
+mac:
+  category: public.app-category.graphics-design
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # sem certificado pago da Apple: app não assinado (na 1ª vez: botão direito › Abrir)
+  identity: null
+dmg:
+  title: Andromeda Moldes
+  artifactName: Andromeda-Moldes-${version}-mac-${arch}.${ext}
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Andromeda Moldes
+  installerLanguages: [pt_BR]
+  language: "1046"
+  artifactName: Andromeda-Moldes-${version}-windows-instalador.${ext}
+
+# publicação nas Releases do GitHub: entra quando o repositório for criado (owner/repo)

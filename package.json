@@ -1,0 +1,26 @@
+{
+  "name": "cad-textil",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sistema CAD têxtil: Hub, Matriz 2D/3D, Modelagem 2D, Risco e Encaixe",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/core --noEmit",
+    "prova": "tsx packages/core/test/gerar-prova.ts",
+    "bases": "tsx packages/bases/test/gerar-bases.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "allowScripts": {
+    "electron@45.2.3": true,
+    "esbuild@0.28.2": true
+  }
+}

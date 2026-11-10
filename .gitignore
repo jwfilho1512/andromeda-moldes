@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+release/
+apps/modelagem-2d/release/
+# projeto separado (não faz parte do Andromeda Moldes)
+factory-destrava-em-massa/
+.claude/
+# notas internas de planejamento (ficam só no computador)
+docs/ferramentas-audaces.md
