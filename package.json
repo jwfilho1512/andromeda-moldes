@@ -2,7 +2,7 @@
   "name": "cad-textil",
   "private": true,
   "version": "0.1.0",
-  "description": "Sistema CAD têxtil: Hub, Matriz 2D/3D, Modelagem 2D, Risco e Encaixe",
+  "description": "Andromeda Fashion Studio: Draw (desenho e ficha técnica), Moldes (modelagem 2D, risco e encaixe) e 3D",
   "workspaces": [
     "packages/*",
     "apps/*"

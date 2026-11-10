@@ -1,0 +1,52 @@
+# Instaladores do Andromeda Draw (electron-builder)
+#   Mac:     npm run dist:mac -w @cad-textil/draw   → release/*.dmg (Apple Silicon e Intel)
+#   Windows: npm run dist:win -w @cad-textil/draw   → release/*.exe (melhor gerar no GitHub Actions)
+appId: com.andromedafashion.draw
+productName: Andromeda Draw
+copyright: Andromeda Fashion Studio
+electronVersion: 45.2.3
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - package.json
+asar: true
+npmRebuild: false
+
+# desenho + ficha técnica (.adraw) abre com duplo clique
+fileAssociations:
+  - ext: adraw
+    name: Desenho Andromeda
+    description: Desenho técnico e ficha técnica do Andromeda Draw
+    role: Editor
+
+mac:
+  category: public.app-category.graphics-design
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  identity: null
+dmg:
+  title: Andromeda Draw
+  artifactName: Andromeda-Draw-${version}-mac-${arch}.${ext}
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Andromeda Draw
+  installerLanguages: [pt_BR]
+  language: "1046"
+  artifactName: Andromeda-Draw-${version}-windows-instalador.${ext}
