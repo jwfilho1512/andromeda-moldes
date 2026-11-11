@@ -195,3 +195,62 @@ export function newDrawDoc(ref: string, nome: string, colecao: string, moldes: {
     ficha: { ref, nome, colecao, status: 'rascunho', data: new Date().toISOString().slice(0, 10), moldes },
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Cópias instaladas (para achar duplicadas e desinstalar)             */
+/* ------------------------------------------------------------------ */
+
+export interface Copy {
+  /** Executável (Windows) ou pasta .app (Mac). */
+  path: string;
+  version?: string;
+  /** usuario = só esta conta; todos = para todos os usuários (Windows: Arquivos de Programas; Mac: /Applications). */
+  scope: 'usuario' | 'todos';
+  /** Windows: linha de comando do desinstalador silencioso. */
+  uninstall?: string;
+}
+
+/** Saída do `reg query <chave>` → valores (nome → texto). */
+export function parseRegValues(stdout: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = /^\s{2,}(\S.*?)\s{2,}REG_(?:SZ|EXPAND_SZ|DWORD)\s{2,}(.*)$/.exec(line);
+    if (m) out[m[1]!.trim()] = m[2]!.trim();
+  }
+  return out;
+}
+
+/** Chaves (linhas HKEY_…) que o `reg query /s /f` encontrou. */
+export function parseRegKeys(stdout: string): string[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^HKEY_/.test(l));
+}
+
+/** "\"C:\\x\\Uninstall A.exe\" /currentuser /S" → { exe, args } */
+export function parseCommandLine(cmd: string): { exe: string; args: string[] } {
+  const t = cmd.trim();
+  let exe: string, rest: string;
+  if (t.startsWith('"')) {
+    const end = t.indexOf('"', 1);
+    exe = t.slice(1, end < 0 ? undefined : end);
+    rest = end < 0 ? '' : t.slice(end + 1);
+  } else {
+    const sp = t.search(/\s/);
+    exe = sp < 0 ? t : t.slice(0, sp);
+    rest = sp < 0 ? '' : t.slice(sp);
+  }
+  return { exe, args: rest.split(/\s+/).filter(Boolean) };
+}
+
+/** A cópia mais nova (é a que o hub abre e atualiza). */
+export function newestCopy(copies: Copy[]): Copy | null {
+  return copies.reduce<Copy | null>((best, c) => (!best || compareVersions(c.version ?? '0', best.version ?? '0') > 0 ? c : best), null);
+}
+
+/** Onde instalar a atualização: por cima da cópia que já existe (no Windows, "para todos" pede administrador). */
+export function installScope(copies: Copy[]): 'usuario' | 'todos' {
+  const newest = newestCopy(copies);
+  return newest?.scope ?? 'usuario';
+}

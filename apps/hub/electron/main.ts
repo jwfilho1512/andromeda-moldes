@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { newDocument, serializeDocument } from '@cad-textil/core';
 import { APPS, type AppId, HUB, RELEASES_URL, compareVersions, groupProducts, newDrawDoc, pickAsset, productFolderName, selfUpdateBlocker } from './catalog';
-import { detect, downloadAndInstall, latestRelease, openApp, scanWorkspace, updateSelf } from './system';
+import { detect, downloadAndInstall, findCopies, isRunning, latestRelease, openApp, quitApp, scanWorkspace, uninstallWindows, updateSelf } from './system';
 
 const isMac = process.platform === 'darwin';
 const APP_NAME = 'Andromeda Fashion Studio';
@@ -64,8 +64,10 @@ ipcMain.handle('install', async (_e, id: AppId) => {
     const r = await latestRelease();
     const asset = pickAsset(r.assets, a, process.platform, process.arch);
     if (!asset) throw new Error(`${a.name} ainda não tem instalador para este computador na versão ${r.version}`);
+    // Windows: o instalador fecha o app sozinho; Mac: o app aberto continua na versão antiga até reabrir
+    const wasRunning = process.platform === 'darwin' && (await isRunning(a));
     const path = await downloadAndInstall(a, asset, (phase, f) => win?.webContents.send('installProgress', { id, phase, f }));
-    return { ok: true, path };
+    return { ok: true, path, version: r.version, wasRunning };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   } finally {
@@ -82,6 +84,41 @@ ipcMain.handle('openApp', async (_e, id: AppId, file?: string) => {
     return null;
   } catch (err) {
     return (err as Error).message;
+  }
+});
+
+/** Fecha e abre de novo (para a versão nova valer). */
+ipcMain.handle('restartApp', async (_e, id: AppId) => {
+  const a = appDef(id);
+  await quitApp(a);
+  const d = await detect(a);
+  if (!d.path) return `${a.name} não está instalado`;
+  await openApp(a, d.path).catch(() => undefined);
+  return null;
+});
+
+/** Desinstala uma cópia (ou todas). Mac: vai para a Lixeira. Windows: desinstalador do próprio app. */
+ipcMain.handle('uninstall', async (_e, id: AppId, path: string | null, closeFirst: boolean) => {
+  const a = appDef(id);
+  if (busy.has(id)) return { ok: false, error: 'Espere terminar a instalação' };
+  busy.add(id);
+  try {
+    const copies = (await findCopies(a)).filter((c) => !path || c.path === path);
+    if (!copies.length) throw new Error('Não achei essa instalação');
+    if (await isRunning(a)) {
+      if (!closeFirst) return { ok: false, running: true, error: `${a.name} está aberto` };
+      await quitApp(a);
+      if (await isRunning(a)) throw new Error(`Não consegui fechar o ${a.name}; feche-o e tente de novo`);
+    }
+    for (const c of copies) {
+      if (process.platform === 'darwin') await shell.trashItem(c.path);
+      else await uninstallWindows(a, c);
+    }
+    return { ok: true, removed: copies.length };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  } finally {
+    busy.delete(id);
   }
 });
 

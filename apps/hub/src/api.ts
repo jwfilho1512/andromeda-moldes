@@ -2,14 +2,16 @@
  * Ponte com o sistema (window.hub no app). No navegador (desenvolvimento) usa uma simulação,
  * para dar para ver e testar a interface sem instalar nada.
  */
-import { APPS, type AppDef, type AppId, type Product, type ReleaseAsset, REPO, parseRelease, pickAsset } from '../electron/catalog';
+import { APPS, type AppDef, type AppId, type Copy, type Product, type ReleaseAsset, REPO, parseRelease, pickAsset } from '../electron/catalog';
 
-export type { AppDef, AppId, Product, ReleaseAsset };
+export type { AppDef, AppId, Copy, Product, ReleaseAsset };
 
 export interface AppStatus extends AppDef {
   installed: boolean;
   version?: string;
   path?: string;
+  copies?: Copy[];
+  running?: boolean;
 }
 
 export interface ReleaseInfo {
@@ -39,7 +41,9 @@ export interface Progress {
 interface HubApi {
   apps(): Promise<AppStatus[]>;
   release(force: boolean): Promise<ReleaseInfo>;
-  install(id: AppId): Promise<{ ok: boolean; error?: string; path?: string }>;
+  install(id: AppId): Promise<{ ok: boolean; error?: string; path?: string; version?: string; wasRunning?: boolean }>;
+  uninstall(id: AppId, path: string | null, closeFirst: boolean): Promise<{ ok: boolean; error?: string; running?: boolean; removed?: number }>;
+  restartApp(id: AppId): Promise<string | null>;
   openApp(id: AppId, file?: string): Promise<string | null>;
   settings(): Promise<{ workspace: string }>;
   pickWorkspace(): Promise<string | null>;
@@ -63,6 +67,14 @@ declare global {
 
 const listeners = new Set<(p: Progress) => void>();
 const installed: Record<string, string> = { moldes: '0.1.0' };
+// simulação: o Moldes com duas cópias (uma antiga "para todos" e a nova só do usuário)
+const mockCopies = (id: string, v: string): Copy[] =>
+  id === 'moldes'
+    ? [
+        { path: 'C:\\Program Files\\Andromeda Moldes\\Andromeda Moldes.exe', version: '0.0.9', scope: 'todos' },
+        { path: 'C:\\Users\\voce\\AppData\\Local\\Programs\\Andromeda Moldes\\Andromeda Moldes.exe', version: v, scope: 'usuario' },
+      ]
+    : [{ path: `/Applications/${id}.app`, version: v, scope: 'todos' }];
 const mockProducts: Product[] = [
   { key: '1', ref: '0137', nome: 'Camiseta básica', colecao: 'Verão 27', status: 'aprovada', dir: '~/Documentos/Andromeda/0137 - Camiseta básica', desenho: '0137.adraw', moldes: ['0137.ctx'], mtime: Date.now() - 3600e3 },
   { key: '2', ref: '0142', nome: 'Calça jeans reta', colecao: 'Verão 27', status: 'desenvolvimento', dir: '~/Documentos/Andromeda/0142 - Calça jeans reta', desenho: '0142.adraw', moldes: [], mtime: Date.now() - 86400e3 },
@@ -71,7 +83,10 @@ const mockProducts: Product[] = [
 
 const mock: HubApi = {
   async apps() {
-    return APPS.map((a) => ({ ...a, installed: !!installed[a.id], version: installed[a.id] }));
+    return APPS.map((a) => {
+      const copies = installed[a.id] ? mockCopies(a.id, installed[a.id]!) : [];
+      return { ...a, installed: !!installed[a.id], version: installed[a.id], copies, path: copies[copies.length - 1]?.path };
+    });
   },
   async release(): Promise<ReleaseInfo> {
     try {
@@ -89,8 +104,15 @@ const mock: HubApi = {
     }
     listeners.forEach((l) => l({ id, phase: 'instalando', f: 1 }));
     await new Promise((r) => setTimeout(r, 500));
-    installed[id] = '0.1.0';
-    return { ok: true };
+    installed[id] = '0.2.3';
+    return { ok: true, version: '0.2.3', wasRunning: id === 'draw' };
+  },
+  async uninstall(id) {
+    delete installed[id];
+    return { ok: true, removed: 1 };
+  },
+  async restartApp() {
+    return null;
   },
   async openApp(id, file) {
     return `Simulação: abriria ${APPS.find((a) => a.id === id)?.name}${file ? ` com ${file}` : ''}`;

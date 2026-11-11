@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('hub', {
   apps: () => ipcRenderer.invoke('apps'),
   release: (force: boolean) => ipcRenderer.invoke('release', force),
   install: (id: string) => ipcRenderer.invoke('install', id),
+  uninstall: (id: string, path: string | null, closeFirst: boolean) => ipcRenderer.invoke('uninstall', id, path, closeFirst),
+  restartApp: (id: string) => ipcRenderer.invoke('restartApp', id),
   openApp: (id: string, file?: string) => ipcRenderer.invoke('openApp', id, file),
   settings: () => ipcRenderer.invoke('settings'),
   pickWorkspace: () => ipcRenderer.invoke('pickWorkspace'),

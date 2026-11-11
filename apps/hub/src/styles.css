@@ -109,5 +109,17 @@ a { color: var(--accent); cursor: pointer; }
 .selfbar .grow { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .selfbar small { color: var(--muted); }
 .prog.mini { width: 200px; margin: 0; }
+.app-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.cardmenu { position: relative; }
+.cardmenu-drop { position: absolute; right: 0; top: 30px; z-index: 5; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); padding: 4px; display: flex; flex-direction: column; min-width: 230px; }
+.cardmenu-drop button { background: transparent; border: none; justify-content: flex-start; padding: 7px 10px; }
+.cardmenu-drop button:hover { background: var(--panel-2); }
+.cardmenu-drop button.danger { color: var(--danger); }
+.dupes { border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, transparent); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.dupes b { display: flex; align-items: center; gap: 5px; color: var(--warn); font-weight: 600; }
+.dupe { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.dupes small { color: var(--muted); }
+.restart { display: flex; flex-direction: column; gap: 6px; background: rgba(109, 124, 255, 0.12); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+.restart button { align-self: flex-start; }
 .toast { position: fixed; right: 20px; bottom: 20px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--ok); padding: 10px 14px; border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3); max-width: 420px; }
 .toast.err { border-left-color: var(--danger); }

@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat } from 'node:fs/pro
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type AppDef, type FoundFile, type Release, type ReleaseAsset, REPO, macBundleOf, parseRelease } from './catalog';
+import { type AppDef, type Copy, type FoundFile, type Release, type ReleaseAsset, REPO, installScope, macBundleOf, newestCopy, parseCommandLine, parseRegKeys, parseRegValues, parseRelease } from './catalog';
 
 const run = promisify(execFile);
 const isMac = process.platform === 'darwin';
@@ -19,47 +19,122 @@ const UA = { 'User-Agent': 'Andromeda-Fashion-Studio', Accept: 'application/vnd.
 
 export interface Installed {
   installed: boolean;
+  /** Versão da cópia mais nova (a que o hub abre). */
   version?: string;
   path?: string;
+  /** Todas as cópias encontradas (mais de uma = duplicada). */
+  copies: Copy[];
+  /** O app está aberto agora. */
+  running?: boolean;
 }
 
-function macCandidates(app: AppDef) {
-  return [join('/Applications', `${app.name}.app`), join(homedir(), 'Applications', `${app.name}.app`)];
+async function macVersion(bundle: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await run('plutil', ['-extract', 'CFBundleShortVersionString', 'raw', join(bundle, 'Contents', 'Info.plist')]);
+    return stdout.trim();
+  } catch {
+    return undefined;
+  }
 }
 
-function winCandidates(app: AppDef) {
-  const local = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
-  const pf = process.env.ProgramFiles ?? 'C:\\Program Files';
-  return [join(local, 'Programs', app.name, `${app.name}.exe`), join(pf, app.name, `${app.name}.exe`)];
+const UNINSTALL_KEYS = [
+  'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+];
+
+/** Todas as cópias do app neste computador. */
+export async function findCopies(app: AppDef): Promise<Copy[]> {
+  if (isMac) {
+    const out: Copy[] = [];
+    for (const [p, scope] of [[join('/Applications', `${app.name}.app`), 'todos'], [join(homedir(), 'Applications', `${app.name}.app`), 'usuario']] as const)
+      if (existsSync(p)) out.push({ path: p, version: await macVersion(p), scope });
+    return out;
+  }
+  if (isWin) {
+    const byPath = new Map<string, Copy>();
+    // 1) registro (o instalador grava versão, pasta e desinstalador) — do usuário e da máquina
+    for (const root of UNINSTALL_KEYS) {
+      let keys: string[] = [];
+      try {
+        const { stdout } = await run('reg', ['query', root, '/s', '/f', app.name, '/d']);
+        keys = parseRegKeys(stdout).filter((k) => k.toUpperCase() !== root.replace(/^HKCU/, 'HKEY_CURRENT_USER').replace(/^HKLM/, 'HKEY_LOCAL_MACHINE').toUpperCase());
+      } catch {
+        continue; // chave sem nada do app
+      }
+      for (const key of keys) {
+        try {
+          const v = parseRegValues((await run('reg', ['query', key])).stdout);
+          if (!(v.DisplayName ?? '').startsWith(app.name)) continue;
+          const dir = v.InstallLocation;
+          if (!dir) continue;
+          const exe = join(dir, `${app.name}.exe`);
+          if (!existsSync(exe)) continue;
+          byPath.set(exe.toLowerCase(), { path: exe, version: v.DisplayVersion, scope: key.startsWith('HKEY_CURRENT_USER') ? 'usuario' : 'todos', uninstall: v.QuietUninstallString ?? (v.UninstallString ? `${v.UninstallString} /S` : undefined) });
+        } catch {
+          /* chave ilegível */
+        }
+      }
+    }
+    // 2) pastas de sempre (caso o registro esteja faltando)
+    const local = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
+    const pfs = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean) as string[];
+    for (const [exe, scope] of [[join(local, 'Programs', app.name, `${app.name}.exe`), 'usuario'], ...pfs.map((pf) => [join(pf, app.name, `${app.name}.exe`), 'todos'])] as [string, Copy['scope']][]) {
+      if (existsSync(exe) && !byPath.has(exe.toLowerCase())) {
+        const un = join(dirname(exe), `Uninstall ${app.name}.exe`);
+        byPath.set(exe.toLowerCase(), { path: exe, scope, uninstall: existsSync(un) ? `"${un}" /S` : undefined });
+      }
+    }
+    return [...byPath.values()];
+  }
+  return [];
+}
+
+/** O app está aberto? */
+export async function isRunning(app: AppDef, copy?: Copy): Promise<boolean> {
+  try {
+    if (isMac) {
+      const { stdout } = await run('pgrep', ['-f', copy ? `${copy.path}/Contents/MacOS/` : `${app.name}.app/Contents/MacOS/`]);
+      return stdout.trim().length > 0;
+    }
+    if (isWin) {
+      const { stdout } = await run('tasklist', ['/FI', `IMAGENAME eq ${app.name}.exe`, '/NH']);
+      return stdout.toLowerCase().includes(`${app.name.toLowerCase()}.exe`);
+    }
+  } catch {
+    /* pgrep sai com erro quando não acha nada */
+  }
+  return false;
 }
 
 export async function detect(app: AppDef): Promise<Installed> {
-  if (isMac) {
-    for (const p of macCandidates(app)) {
-      if (!existsSync(p)) continue;
-      try {
-        const { stdout } = await run('plutil', ['-extract', 'CFBundleShortVersionString', 'raw', join(p, 'Contents', 'Info.plist')]);
-        return { installed: true, version: stdout.trim(), path: p };
-      } catch {
-        return { installed: true, path: p };
-      }
-    }
-    return { installed: false };
-  }
-  if (isWin) {
-    const exe = winCandidates(app).find((p) => existsSync(p));
-    let version: string | undefined;
-    try {
-      // o instalador grava a versão no registro (Desinstalar programas)
-      const { stdout } = await run('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s', '/f', app.name, '/d']);
-      const block = stdout.split(/\r?\n\r?\n/).find((b) => b.includes(app.name)) ?? '';
-      version = /DisplayVersion\s+REG_SZ\s+(\S+)/.exec(block)?.[1];
-    } catch {
-      /* sem registro */
-    }
-    return exe ? { installed: true, version, path: exe } : { installed: false };
-  }
-  return { installed: false };
+  const copies = await findCopies(app);
+  const newest = newestCopy(copies);
+  if (!newest) return { installed: false, copies };
+  return { installed: true, version: newest.version, path: newest.path, copies, running: await isRunning(app) };
+}
+
+/** Fecha o app (Mac: pede para sair, como Cmd+Q; Windows: encerra). */
+export async function quitApp(app: AppDef): Promise<void> {
+  if (isMac) await run('osascript', ['-e', `quit app "${app.name}"`]).catch(() => undefined);
+  else if (isWin) await run('taskkill', ['/IM', `${app.name}.exe`]).catch(() => undefined);
+  for (let i = 0; i < 40 && (await isRunning(app)); i++) await new Promise((r) => setTimeout(r, 250));
+}
+
+/** Desinstala uma cópia. Mac: a pasta do app vai para a Lixeira (feito no processo principal). Windows: desinstalador silencioso. */
+export async function uninstallWindows(app: AppDef, copy: Copy): Promise<void> {
+  const cmd = copy.uninstall ?? `"${join(dirname(copy.path), `Uninstall ${app.name}.exe`)}" /S`;
+  const { exe, args } = parseCommandLine(cmd);
+  if (!existsSync(exe)) throw new Error('Não achei o desinstalador desta cópia');
+  if (!args.some((a) => a.toUpperCase() === '/S')) args.push('/S');
+  await new Promise<void>((resolve, reject) => {
+    const p = spawn(exe, args, { windowsHide: true });
+    p.on('error', reject);
+    p.on('exit', () => resolve());
+  });
+  // o desinstalador do NSIS continua de uma cópia temporária: espera o app sumir
+  for (let i = 0; i < 240 && existsSync(copy.path); i++) await new Promise((r) => setTimeout(r, 500));
+  if (existsSync(copy.path)) throw new Error('O desinstalador não terminou (pode ter pedido permissão de administrador)');
 }
 
 /* ---------------- Releases ---------------- */
@@ -107,16 +182,22 @@ export async function install(app: AppDef, file: string): Promise<string> {
     try {
       const appDir = (await readdir(mount)).find((n) => n.endsWith('.app'));
       if (!appDir) throw new Error('O instalador não tem o app dentro');
-      for (const dest of ['/Applications', join(homedir(), 'Applications')]) {
+      // atualiza no lugar da cópia que já existe (senão o Dock e o Launchpad continuariam abrindo a antiga)
+      const existing = newestCopy(await findCopies(app));
+      const dests = existing ? [dirname(existing.path)] : ['/Applications', join(homedir(), 'Applications')];
+      for (const dest of dests) {
         try {
           await mkdir(dest, { recursive: true });
           const target = join(dest, `${app.name}.app`);
+          const fresh = `${target}.novo`;
+          await rm(fresh, { recursive: true, force: true });
+          await run('ditto', [join(mount, appDir), fresh]);
           await rm(target, { recursive: true, force: true });
-          await run('ditto', [join(mount, appDir), target]);
+          await rename(fresh, target);
           return target;
         } catch (err) {
-          if (dest !== '/Applications') throw err;
-          // sem permissão em /Applications: tenta ~/Applications
+          if (dest === dests[dests.length - 1]) throw new Error(`Não foi possível copiar o app para ${dest}: ${(err as Error).message}`);
+          // sem permissão em /Applications: tenta ~/Applications (só quando ainda não havia cópia)
         }
       }
       throw new Error('Não foi possível copiar o app');
@@ -125,9 +206,11 @@ export async function install(app: AppDef, file: string): Promise<string> {
     }
   }
   if (isWin) {
-    // instalador NSIS do electron-builder: /S = silencioso, /currentuser = sem pedir administrador
+    // instalador NSIS do electron-builder, silencioso (/S), por cima da cópia que já existe:
+    // "para todos os usuários" (/allusers, pede administrador) ou só este usuário (/currentuser)
+    const scope = installScope(await findCopies(app));
     await new Promise<void>((resolve, reject) => {
-      const p = spawn(file, ['/S', '/currentuser'], { windowsHide: true });
+      const p = spawn(file, ['/S', scope === 'todos' ? '/allusers' : '/currentuser'], { windowsHide: true });
       p.on('error', reject);
       p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`O instalador terminou com código ${code}`))));
     });
@@ -171,8 +254,11 @@ export async function updateSelf(asset: ReleaseAsset, exePath: string, progress:
     return 'relaunch';
   }
   if (isWin) {
-    // o instalador continua sozinho depois que o hub fecha; a pasta temporária fica para o Windows limpar
-    const p = spawn(file, ['/S', '/currentuser', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
+    // o instalador continua sozinho depois que o hub fecha; a pasta temporária fica para o Windows limpar.
+    // Por cima da cópia que está rodando: em Arquivos de Programas = "para todos" (pede administrador).
+    const pf = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean).map((p) => p!.toLowerCase());
+    const allUsers = pf.some((p) => exePath.toLowerCase().startsWith(p));
+    const p = spawn(file, ['/S', allUsers ? '/allusers' : '/currentuser', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
     p.unref();
     return 'quit';
   }

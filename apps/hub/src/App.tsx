@@ -4,6 +4,8 @@ import {
   IconBrandGithub,
   IconBrush,
   IconBug,
+  IconAlertTriangle,
+  IconDots,
   IconDownload,
   IconExternalLink,
   IconFolder,
@@ -14,7 +16,7 @@ import {
   IconRefresh,
   IconScissors,
 } from '@tabler/icons-react';
-import { type ComponentType, useCallback, useEffect, useState } from 'react';
+import { type ComponentType, useCallback, useEffect, useRef, useState } from 'react';
 import { compareVersions, RELEASES_URL, REPO } from '../electron/catalog';
 import { type AppId, type AppStatus, type HubUpdate, type Product, type Progress, type ReleaseInfo, hub, isDesktop } from './api';
 
@@ -72,13 +74,35 @@ export function App() {
     };
   }, [refreshApps, refreshRelease]);
 
+  const [restart, setRestart] = useState<Record<string, string | undefined>>({});
   const install = async (a: AppStatus) => {
     setProgress((s) => ({ ...s, [a.id]: { id: a.id, phase: 'baixando', f: 0 } }));
     const r = await hub.install(a.id);
     setProgress((s) => ({ ...s, [a.id]: undefined }));
-    if (r.ok) say(`${a.name} instalado`);
-    else say(r.error ?? 'Não foi possível instalar', true);
+    if (r.ok) {
+      say(`${a.name} ${r.version ? `${r.version} ` : ''}instalado`);
+      if (r.wasRunning) setRestart((s) => ({ ...s, [a.id]: r.version ?? 'nova' }));
+    } else say(r.error ?? 'Não foi possível instalar', true);
     await refreshApps();
+  };
+
+  const uninstall = async (a: AppStatus, path: string | null) => {
+    const what = path ? 'esta cópia' : 'o app';
+    if (!window.confirm(`Desinstalar ${what} do ${a.name}?${isMac ? ' Ele vai para a Lixeira.' : ''} Seus arquivos de desenho e moldes não são apagados.`)) return;
+    let r = await hub.uninstall(a.id, path, false);
+    if (!r.ok && r.running) {
+      if (!window.confirm(`O ${a.name} está aberto. Fechar e desinstalar?`)) return;
+      r = await hub.uninstall(a.id, path, true);
+    }
+    if (r.ok) say(`${a.name}: ${r.removed && r.removed > 1 ? `${r.removed} cópias removidas` : 'desinstalado'}`);
+    else say(r.error ?? 'Não foi possível desinstalar', true);
+    await refreshApps();
+  };
+
+  const reopen = async (a: AppStatus) => {
+    setRestart((s) => ({ ...s, [a.id]: undefined }));
+    const err = await hub.restartApp(a.id);
+    if (err) say(err, true);
   };
 
   const updateSelf = async () => {
@@ -125,7 +149,19 @@ export function App() {
 
       <main className="main">
         {self?.available && <SelfUpdateBar u={self} p={progress.hub} onUpdate={() => void updateSelf()} />}
-        {page === 'apps' && <AppsPage apps={apps} rel={rel} progress={progress} onInstall={install} onOpen={(id) => void open(id)} onCheck={() => void refreshRelease(true).then(refreshApps)} />}
+        {page === 'apps' && (
+          <AppsPage
+            apps={apps}
+            rel={rel}
+            progress={progress}
+            restart={restart}
+            onInstall={install}
+            onUninstall={(a, p) => void uninstall(a, p)}
+            onReopen={(a) => void reopen(a)}
+            onOpen={(id) => void open(id)}
+            onCheck={() => void refreshRelease(true).then(refreshApps)}
+          />
+        )}
         {page === 'produtos' && <ProductsPage apps={apps} onOpen={open} say={say} />}
         {page === 'ajuda' && <HelpPage />}
       </main>
@@ -162,18 +198,55 @@ function SelfUpdateBar({ u, p, onUpdate }: { u: HubUpdate; p: Progress | 'erro' 
   );
 }
 
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+const scopeLabel = (s: 'usuario' | 'todos') => (isMac ? (s === 'todos' ? 'em Aplicativos' : 'em Aplicativos do usuário') : s === 'todos' ? 'para todos os usuários' : 'só para você');
+
+/** Menu ⋯ do cartão: reinstalar e desinstalar. */
+function CardMenu({ a, onInstall, onUninstall }: { a: AppStatus; onInstall: () => void; onUninstall: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('mousedown', off);
+    return () => document.removeEventListener('mousedown', off);
+  }, [open]);
+  return (
+    <div className="cardmenu" ref={ref}>
+      <button className="ghost icon" title="Mais opções" onClick={() => setOpen(!open)}>
+        <IconDots size={16} />
+      </button>
+      {open && (
+        <div className="cardmenu-drop">
+          <button onClick={() => (setOpen(false), onInstall())}>Reinstalar a versão mais nova</button>
+          {a.path && <button onClick={() => (setOpen(false), void hub.reveal(a.path!))}>Mostrar onde está instalado</button>}
+          <button className="danger" onClick={() => (setOpen(false), onUninstall())}>
+            Desinstalar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppsPage({
   apps,
   rel,
   progress,
+  restart,
   onInstall,
+  onUninstall,
+  onReopen,
   onOpen,
   onCheck,
 }: {
   apps: AppStatus[];
   rel: ReleaseInfo | null;
   progress: Record<string, Progress | 'erro' | undefined>;
+  restart: Record<string, string | undefined>;
   onInstall: (a: AppStatus) => void;
+  onUninstall: (a: AppStatus, path: string | null) => void;
+  onReopen: (a: AppStatus) => void;
   onOpen: (id: AppId) => void;
   onCheck: () => void;
 }) {
@@ -198,8 +271,11 @@ function AppsPage({
           const update = a.installed && !!asset && !!rel?.version && !!a.version && compareVersions(rel.version, a.version) > 0;
           return (
             <article key={a.id} className={`app ${a.soon ? 'soon' : ''} ${a.installed ? 'inst' : ''}`}>
-              <div className={`app-icon ${a.id}`}>
-                <Icon size={26} />
+              <div className="app-top">
+                <div className={`app-icon ${a.id}`}>
+                  <Icon size={26} />
+                </div>
+                {a.installed && !p && <CardMenu a={a} onInstall={() => onInstall(a)} onUninstall={() => onUninstall(a, null)} />}
               </div>
               <h2>{a.name}</h2>
               <p className="muted">{a.desc}</p>
@@ -212,7 +288,37 @@ function AppsPage({
                   <span className="pill">Não instalado</span>
                 )}
                 {update && <span className="pill warn">Nova versão {rel?.version}</span>}
+                {a.running && <span className="pill">Aberto agora</span>}
               </div>
+              {(a.copies?.length ?? 0) > 1 && (
+                <div className="dupes">
+                  <b>
+                    <IconAlertTriangle size={14} /> {a.copies!.length} cópias neste computador
+                  </b>
+                  {a.copies!.map((c) => (
+                    <div key={c.path} className="dupe">
+                      <span>
+                        {c.version ?? 'versão ?'} · {scopeLabel(c.scope)}
+                        {c.path === a.path ? ' (a mais nova)' : ''}
+                      </span>
+                      {c.path !== a.path && (
+                        <button className="link" onClick={() => onUninstall(a, c.path)} title={c.path}>
+                          Remover
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <small>O atalho ou o Dock podem estar abrindo a cópia antiga. Remova-a para ficar só a nova.</small>
+                </div>
+              )}
+              {restart[a.id] && (
+                <div className="restart">
+                  <span>O {a.short} estava aberto: reabra para usar a {restart[a.id]}.</span>
+                  <button className="primary" onClick={() => onReopen(a)}>
+                    Reabrir agora
+                  </button>
+                </div>
+              )}
               {p && p !== 'erro' ? (
                 <div className="prog">
                   <div className="bar">

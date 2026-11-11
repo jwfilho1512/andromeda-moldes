@@ -94,3 +94,33 @@ describe('atualização do próprio hub', () => {
     expect(macBundleOf('/usr/bin/node')).toBeNull();
   });
 });
+
+describe('cópias instaladas', () => {
+  it('lê o registro do Windows e o desinstalador', async () => {
+    const { parseRegValues, parseRegKeys, parseCommandLine } = await import('../electron/catalog');
+    const out = [
+      'HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\4b7f1c2a-guid',
+      '    DisplayName    REG_SZ    Andromeda Draw 0.2.0',
+      '    DisplayVersion    REG_SZ    0.2.0',
+      '    InstallLocation    REG_SZ    C:\\Program Files\\Andromeda Draw',
+      '    QuietUninstallString    REG_SZ    "C:\\Program Files\\Andromeda Draw\\Uninstall Andromeda Draw.exe" /allusers /S',
+      '',
+    ].join('\r\n');
+    expect(parseRegKeys(out)).toHaveLength(1);
+    const v = parseRegValues(out);
+    expect(v.DisplayVersion).toBe('0.2.0');
+    expect(v.InstallLocation).toBe('C:\\Program Files\\Andromeda Draw');
+    expect(parseCommandLine(v.QuietUninstallString!)).toEqual({ exe: 'C:\\Program Files\\Andromeda Draw\\Uninstall Andromeda Draw.exe', args: ['/allusers', '/S'] });
+  });
+  it('atualiza por cima da cópia mais nova e aponta a antiga', async () => {
+    const { newestCopy, installScope } = await import('../electron/catalog');
+    const copies = [
+      { path: 'C:\\Program Files\\Andromeda Draw\\Andromeda Draw.exe', version: '0.2.0', scope: 'todos' as const },
+      { path: 'C:\\Users\\x\\AppData\\Local\\Programs\\Andromeda Draw\\Andromeda Draw.exe', version: '0.2.3', scope: 'usuario' as const },
+    ];
+    expect(newestCopy(copies)?.version).toBe('0.2.3');
+    expect(installScope(copies)).toBe('usuario');
+    expect(installScope([copies[0]!])).toBe('todos');
+    expect(installScope([])).toBe('usuario');
+  });
+});
