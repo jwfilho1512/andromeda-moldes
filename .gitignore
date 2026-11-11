@@ -7,6 +7,7 @@ release/
 apps/modelagem-2d/release/
 # projeto separado (não faz parte do Andromeda Moldes)
 factory-destrava-em-massa/
+factory-destrava-em-massa*.zip
 .claude/
 # notas internas de planejamento (ficam só no computador)
 docs/ferramentas-audaces.md

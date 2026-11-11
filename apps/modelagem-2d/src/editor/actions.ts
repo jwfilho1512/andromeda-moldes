@@ -3,7 +3,9 @@ import {
   type Piece,
   arrangePieces,
   bboxOfPoints,
+  closestOnPath,
   createPiece,
+  insertPieceVertex,
   cutLine,
   mapPiece,
   unionBBox,
@@ -17,23 +19,50 @@ import { pieceGeom, pointInPolygon } from './render';
 import { canvasApi } from './Canvas';
 import type { Base } from '@cad-textil/bases';
 
+/** Até onde um ponto digitado conta como "em cima do contorno" (mm). */
+const ON_CONTOUR_MM = 0.05;
+
+export type PointKind = 'contorno' | 'vertice' | 'interno';
+
 /**
- * Cria um ponto interno (furo/marcação) no molde que contém `p` — de preferência o selecionado.
- * Retorna o molde ou null se o ponto ficou fora de todos.
+ * Cria o ponto digitado por coordenadas:
+ *  - em cima do contorno → vira um ponto (vértice) do contorno, como no Audaces;
+ *  - em cima de um vértice que já existe → não cria nada, só serve de referência;
+ *  - dentro do molde → ponto interno (furo/marcação).
+ * Prefere o molde selecionado. Retorna null se o ponto ficou fora de todos os moldes.
  */
-export function addDrillAt(p: { x: number; y: number }): Piece | null {
+export function addPointAt(p: { x: number; y: number }): { piece: Piece; kind: PointKind } | null {
   const s = editor.get();
   const usable = s.doc.pieces.filter((q) => !s.hidden[q.id] && !s.locked[q.id]);
   const sel = usable.find((q) => q.id === s.selection.pieceId);
+  const order = sel ? [sel, ...[...usable].reverse().filter((q) => q !== sel)] : [...usable].reverse();
+
+  // 1) em cima do contorno
+  for (const q of order) {
+    const hit = closestOnPath(q.outline, p);
+    if (hit.distance > ON_CONTOUR_MM) continue;
+    const vs = vertices(q.outline);
+    const n = vs.length;
+    const a = vs[hit.edge]!, b = vs[(hit.edge + 1) % n]!;
+    const near = (v: { x: number; y: number }) => Math.hypot(v.x - p.x, v.y - p.y) <= ON_CONTOUR_MM;
+    if (near(a) || near(b)) {
+      select({ pieceId: q.id, vertex: near(a) ? hit.edge : (hit.edge + 1) % n, edge: null });
+      return { piece: q, kind: 'vertice' };
+    }
+    commitPiece(q.id, (x) => insertPieceVertex(x, hit.edge, hit.t), { pieceId: q.id, vertex: hit.edge + 1, edge: null });
+    return { piece: q, kind: 'contorno' };
+  }
+
+  // 2) dentro do molde (inclui a área da margem de costura)
   const inside = (q: Piece) => pointInPolygon(p, pieceGeom(q).cut);
-  const target = sel && inside(sel) ? sel : [...usable].reverse().find(inside);
+  const target = order.find(inside);
   if (!target) {
     notify('O ponto ficou fora dos moldes — confira X e Y', 'error');
     return null;
   }
   const at = { x: Math.round(p.x * 1000) / 1000, y: Math.round(p.y * 1000) / 1000 };
   commitPiece(target.id, (q) => ({ ...q, drills: [...(q.drills ?? []), at] }), { pieceId: target.id, vertex: null, edge: null });
-  return target;
+  return { piece: target, kind: 'interno' };
 }
 
 export function setTool(tool: Tool): void {

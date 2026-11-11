@@ -9,7 +9,7 @@ import { bboxOfPoints } from '@cad-textil/core';
 import { coordStore, editor, fmtInput, fmtLen, notify, parseLen, parseNum, unitLabel, useCoordPick, useViewInfo } from './store';
 import { pieceGeom } from './render';
 import { canvasApi } from './Canvas';
-import { addDrillAt } from './actions';
+import { addPointAt } from './actions';
 
 let chainPref = false;
 
@@ -54,9 +54,16 @@ export function CoordPopup() {
   const create = () => {
     if (!valid) return;
     const p = { x: pick.ref.x + pick.dx, y: pick.ref.y + pick.dy };
-    const piece = addDrillAt(p);
-    if (!piece) return;
-    notify(`Ponto criado em "${piece.name}" (X ${fmtLen(pick.dx)} · Y ${fmtLen(pick.dy)} da referência)`);
+    const r = addPointAt(p);
+    if (!r) return;
+    const where = `X ${fmtLen(pick.dx)} · Y ${fmtLen(pick.dy)} da referência`;
+    notify(
+      r.kind === 'contorno'
+        ? `Ponto criado no contorno de "${r.piece.name}" (${where})`
+        : r.kind === 'vertice'
+          ? `Já existe um ponto do contorno aqui em "${r.piece.name}" (${where})`
+          : `Ponto interno criado em "${r.piece.name}" (${where})`,
+    );
     if (chain) {
       coordStore.set({ pick: { ...pick, ref: p, label: 'último ponto criado', chained: true } });
     } else coordStore.set({ pick: null });
