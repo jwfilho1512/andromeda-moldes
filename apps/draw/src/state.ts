@@ -4,7 +4,7 @@ import { emptyFicha, normalizeFicha, type Ficha } from './model/ficha';
 import { type Affine, bakeMirror, transformShape } from './model/geom';
 import { STITCH_DEFAULT } from './model/stitch';
 import { TRIM_SIZE } from './model/trims';
-import type { DrawDoc, Fill, Layer, Shape, StitchType, Style, TrimKind } from './model/types';
+import type { Brush, DrawDoc, Fill, Layer, Shape, StitchType, Style, TrimKind } from './model/types';
 
 type Listener = () => void;
 
@@ -23,7 +23,26 @@ export class Store<T> {
   };
 }
 
-export type Tool = 'select' | 'direct' | 'pen' | 'rect' | 'ellipse' | 'line' | 'text' | 'stitch' | 'trim' | 'fill' | 'hand';
+export type Tool =
+  | 'select'
+  | 'direct'
+  | 'pen'
+  | 'curvature'
+  | 'pencil'
+  | 'brush'
+  | 'line'
+  | 'arc'
+  | 'rect'
+  | 'ellipse'
+  | 'polygon'
+  | 'text'
+  | 'dim'
+  | 'stitch'
+  | 'trim'
+  | 'fill'
+  | 'eyedropper'
+  | 'scissors'
+  | 'hand';
 export type View = 'desenho' | 'ficha';
 export type Theme = 'escuro' | 'claro';
 
@@ -46,6 +65,12 @@ export interface EditorState {
   stitch: { type: StitchType; dist: number; side: 1 | -1; color: string; gap: number; len: number };
   trim: { kind: TrimKind; color: string };
   fill: Fill;
+  /** Pincel da ferramenta Pincel. */
+  brush: Brush;
+  /** Polígono / estrela. */
+  poly: { sides: number; star: boolean; inner: number };
+  /** Suavização do lápis e do pincel (px na tela). */
+  smooth: number;
   past: DrawDoc[];
   future: DrawDoc[];
   message: { text: string; kind: 'info' | 'erro' } | null;
@@ -92,6 +117,9 @@ export const editor = new Store<EditorState>({
   stitch: { type: 'duplo', dist: 6, side: 1, color: '#1b1b1f', gap: STITCH_DEFAULT.duplo.gap * 10, len: STITCH_DEFAULT.duplo.len * 10 },
   trim: { kind: 'botao4', color: '#1b1b1f' },
   fill: { kind: 'pattern', pattern: 'sarja', c1: '#3d5a80', c2: '#24344d', scale: 0.6, angle: 0 },
+  brush: { kind: 'afinado', size: 1.2, angle: 35 },
+  poly: { sides: 6, star: false, inner: 0.5 },
+  smooth: 2.5,
   past: [],
   future: [],
   message: null,
@@ -320,4 +348,12 @@ export function updateDeep(sid: string, cid: string | null | undefined, fn: (s: 
     return s;
   };
   commit((d) => mapLayers(d, (l) => ({ ...l, shapes: l.shapes.map((s) => (s.id === sid ? map(s) : s)) })));
+}
+
+/** Troca uma forma (de cima ou dentro de grupo) por zero ou mais formas. */
+export function replaceDeep(sid: string, cid: string | null | undefined, fn: (s: Shape) => Shape[]) {
+  const target = cid ?? sid;
+  const mapList = (list: Shape[]): Shape[] =>
+    list.flatMap((s) => (s.id === target ? fn(s) : s.kind === 'group' ? [{ ...s, children: mapList(s.children) }] : [s]));
+  commit((d) => mapLayers(d, (l) => (l.shapes.some((s) => s.id === sid) ? { ...l, shapes: mapList(l.shapes) } : l)));
 }

@@ -132,3 +132,64 @@ describe('pesponto ao longo da borda', () => {
     for (const p of pts) expect(p.x <= 2 + 1e-9 || p.y <= 1e-9).toBe(true);
   });
 });
+
+describe('ferramentas de desenho', () => {
+  it('lápis: simplifica o traço e mantém as pontas', async () => {
+    const { simplify, freehandPath } = await import('../src/model/draw-tools');
+    const raw = Array.from({ length: 101 }, (_, i) => ({ x: i, y: Math.sin(i / 10) * 0.02 }));
+    const s = simplify(raw, 0.1);
+    expect(s.length).toBe(2);
+    const p = freehandPath(raw, 0.1, false)!;
+    expect(p.start).toEqual({ x: 0, y: raw[0]!.y });
+    expect(p.segments[p.segments.length - 1]!.to.x).toBe(100);
+  });
+
+  it('polígono e estrela', async () => {
+    const { polygonPath } = await import('../src/model/draw-tools');
+    const hex = polygonPath({ x: 0, y: 0 }, 10, 6, 0);
+    expect(hex.segments).toHaveLength(6);
+    for (const s of hex.segments) expect(Math.hypot(s.to.x, s.to.y)).toBeCloseTo(10, 9);
+    const star = polygonPath({ x: 0, y: 0 }, 10, 5, 0, 0.5);
+    expect(star.segments).toHaveLength(10);
+    expect(Math.hypot(star.segments[0]!.to.x, star.segments[0]!.to.y)).toBeCloseTo(5, 9);
+  });
+
+  it('tesoura: corta um traço aberto em dois e abre um contorno fechado', async () => {
+    const { splitPathAt } = await import('../src/model/draw-tools');
+    const parts = splitPathAt(line([0, 0], [100, 0]), { x: 30, y: 1 });
+    expect(parts).toHaveLength(2);
+    expect(parts[0]!.segments[0]!.to.x).toBeCloseTo(30, 9);
+    expect(parts[1]!.start.x).toBeCloseTo(30, 9);
+    const sq = { ...line([0, 0], [10, 0], [10, 10], [0, 10], [0, 0]), closed: true };
+    const open = splitPathAt(sq, { x: 10, y: 5 });
+    expect(open).toHaveLength(1);
+    expect(open[0]!.closed).toBe(false);
+    expect(open[0]!.start).toEqual({ x: 10, y: 5 });
+    expect(open[0]!.segments[open[0]!.segments.length - 1]!.to).toEqual({ x: 10, y: 5 });
+  });
+
+  it('cota mostra a medida real pela escala', async () => {
+    const { dimValueCm, fmtCm } = await import('../src/model/draw-tools');
+    const d = { kind: 'dim' as const, id: 'd', a: { x: 0, y: 0 }, b: { x: 102, y: 0 }, off: 4, color: '#000', size: 3 };
+    expect(fmtCm(dimValueCm(d, 5))).toBe('51 cm');
+    const svg = docToSvg({ ...newDoc(), scale: 5, layers: [{ id: 'l', name: 'l', visible: true, locked: false, shapes: [d] }] });
+    expect(svg).toContain('51 cm');
+  });
+
+  it('pincéis geram formas sem erro (aberto e fechado)', async () => {
+    const { brushRender } = await import('../src/model/brush');
+    const open = line([0, 0], [50, 0], [60, 30]);
+    const closed = { ...line([0, 0], [20, 0], [20, 20], [0, 20], [0, 0]), closed: true };
+    for (const kind of ['caligrafico', 'afinado', 'marcador', 'grafite'] as const)
+      for (const p of [open, closed]) {
+        const r = brushRender(p, { kind, size: 2, angle: 30 });
+        const all = r.fill + r.strokes.map((s) => s.d).join('');
+        expect(all.length, kind).toBeGreaterThan(10);
+        expect(all, kind).not.toMatch(/NaN/);
+      }
+    // afinado: fino nas pontas, cheio no meio
+    const r = brushRender(line([0, 0], [100, 0]), { kind: 'afinado', size: 4 });
+    const ys = (r.fill.match(/-?[\d.]+ -?[\d.]+/g) ?? []).map((s) => Math.abs(Number(s.split(' ')[1])));
+    expect(Math.max(...ys)).toBeCloseTo(2, 1);
+  });
+});

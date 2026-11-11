@@ -1,11 +1,14 @@
 /** Painel direito: propriedades da seleção, documento e camadas. */
 import { IconCopy, IconEye, IconEyeOff, IconFlipHorizontal, IconFlipVertical, IconLock, IconLockOpen, IconPlus, IconRotateClockwise, IconTrash } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
-import { bboxOfShapes, scaleAbout, rotateAbout } from '../model/geom';
+import { flattenPath } from '@cad-textil/core';
+import { BRUSH_LABEL } from '../model/brush';
+import { dimValueCm, fmtCm } from '../model/draw-tools';
+import { bboxOfShapes, offsetPolyline, polyPath, scaleAbout, rotateAbout } from '../model/geom';
 import { PATTERN_LABEL } from '../model/patterns';
 import { STITCH_LABEL } from '../model/stitch';
 import { TRIM_LABEL } from '../model/trims';
-import type { Fill, PatternKind, Shape, StitchType, Style, TrimKind } from '../model/types';
+import type { Brush, BrushKind, Fill, PatternKind, Shape, StitchType, Style, TrimKind } from '../model/types';
 import {
   arrangeSelected,
   commit,
@@ -15,6 +18,7 @@ import {
   expandMirrorSelected,
   groupSelected,
   mapLayers,
+  addShapes,
   newId,
   selectedShapes,
   setStitchType,
@@ -279,23 +283,166 @@ function SelectionProps({ sel }: { sel: Shape[] }) {
           <Row label="Espessura">
             <Num value={fp.style.width} min={0} step={0.05} onChange={(v) => styleAll(ids, (st) => ({ ...st, width: v }))} />
           </Row>
-          <Row label="Tracejado">
-            <select
-              value={fp.style.dash?.length ? 'sim' : 'nao'}
-              onChange={(e) => styleAll(ids, (st) => ({ ...st, dash: e.target.value === 'sim' ? [1, 0.6] : undefined }))}
-            >
-              <option value="nao">Contínuo</option>
-              <option value="sim">Tracejado (dobra, forro)</option>
+          <Row label="Linha">
+            <select value={dashKey(fp.style.dash)} onChange={(e) => styleAll(ids, (st) => ({ ...st, dash: DASHES[e.target.value as keyof typeof DASHES]?.v }))}>
+              {Object.entries(DASHES).map(([k, d]) => (
+                <option key={k} value={k}>
+                  {d.label}
+                </option>
+              ))}
             </select>
           </Row>
+          <Row label="Pontas">
+            <select value={fp.style.cap ?? 'round'} onChange={(e) => styleAll(ids, (st) => ({ ...st, cap: e.target.value as Style['cap'] }))}>
+              <option value="round">Redondas</option>
+              <option value="butt">Retas</option>
+              <option value="square">Quadradas</option>
+            </select>
+          </Row>
+          <BrushEditor brush={fp.style.brush} onChange={(brush) => styleAll(ids, (st) => ({ ...st, brush }))} />
           {one && <FillEditor fill={fp.style.fill} onChange={(fill) => styleAll(ids, (st) => ({ ...st, fill }))} />}
+        </Section>
+      )}
+
+      {one?.kind === 'path' && <ParallelTool shape={one} />}
+
+      {one?.kind === 'dim' && (
+        <Section title="Cota">
+          <p className="muted small">
+            Medida real: <b>{fmtCm(dimValueCm(one, s.doc.scale))}</b> (escala 1:{s.doc.scale})
+          </p>
+          <Row label="Texto">
+            <input
+              value={one.text ?? ''}
+              placeholder={fmtCm(dimValueCm(one, s.doc.scale))}
+              onChange={(e) => updateShapes(ids, (x) => (x.kind === 'dim' ? { ...x, text: e.target.value || undefined } : x))}
+            />
+          </Row>
+          <Row label="Afastamento">
+            <Num value={one.off} step={0.5} onChange={(v) => updateShapes(ids, (x) => (x.kind === 'dim' ? { ...x, off: v } : x))} />
+          </Row>
+          <Row label="Tamanho do texto">
+            <Num value={one.size} step={0.2} min={0.5} onChange={(v) => updateShapes(ids, (x) => (x.kind === 'dim' ? { ...x, size: v } : x))} />
+          </Row>
+          <Row label="Cor">
+            <input type="color" value={one.color} onChange={(e) => updateShapes(ids, (x) => (x.kind === 'dim' ? { ...x, color: e.target.value } : x))} />
+          </Row>
         </Section>
       )}
     </>
   );
 }
 
-const KIND_LABEL: Record<Shape['kind'], string> = { path: 'Traço', stitch: 'Pesponto', trim: 'Aviamento', text: 'Texto', group: 'Grupo', image: 'Imagem' };
+const DASHES = {
+  continua: { label: 'Contínua', v: undefined as number[] | undefined },
+  tracejada: { label: 'Tracejada (dobra, forro)', v: [1, 0.6] },
+  longa: { label: 'Tracejado longo', v: [2.4, 0.8] },
+  pontilhada: { label: 'Pontilhada', v: [0.05, 0.5] },
+  tracoPonto: { label: 'Traço e ponto (centro, eixo)', v: [2, 0.5, 0.05, 0.5] },
+};
+const dashKey = (d?: number[]) => (Object.entries(DASHES).find(([, x]) => JSON.stringify(x.v ?? null) === JSON.stringify(d?.length ? d : null))?.[0] ?? 'tracejada') as keyof typeof DASHES;
+
+function BrushEditor({ brush, onChange }: { brush: Brush | undefined; onChange: (b: Brush | undefined) => void }) {
+  return (
+    <>
+      <Row label="Pincel">
+        <select
+          value={brush?.kind ?? 'nenhum'}
+          onChange={(e) => {
+            const k = e.target.value;
+            onChange(k === 'nenhum' ? undefined : { size: brush?.size ?? 1.2, angle: brush?.angle ?? 35, kind: k as BrushKind });
+          }}
+        >
+          <option value="nenhum">Nenhum (traço comum)</option>
+          {(Object.keys(BRUSH_LABEL) as BrushKind[]).map((k) => (
+            <option key={k} value={k}>
+              {BRUSH_LABEL[k]}
+            </option>
+          ))}
+        </select>
+      </Row>
+      {brush && (
+        <Row label="Espessura do pincel">
+          <Num value={brush.size} step={0.1} min={0.05} onChange={(size) => onChange({ ...brush, size })} />
+        </Row>
+      )}
+      {brush?.kind === 'caligrafico' && (
+        <Row label="Ângulo da ponta">
+          <Num value={brush.angle ?? 35} step={5} suffix="°" onChange={(angle) => onChange({ ...brush, angle })} />
+        </Row>
+      )}
+    </>
+  );
+}
+
+/** Cria uma cópia paralela do traço (barra, recorte, viés, vista). */
+function ParallelTool({ shape }: { shape: Extract<Shape, { kind: 'path' }> }) {
+  const s = useEditor();
+  const k = s.doc.scale;
+  const make = (side: 1 | -1) => {
+    const real = Number((document.getElementById('par-dist') as HTMLInputElement | null)?.value ?? '10');
+    const d = (Number.isFinite(real) ? real : 10) / k;
+    let pts = flattenPath(shape.path, 0.05);
+    // contorno fechado: o último ponto repete o primeiro
+    if (shape.path.closed && pts.length > 2) pts = pts.slice(0, -1);
+    const path = polyPath(offsetPolyline(pts, d * side, shape.path.closed), shape.path.closed);
+    addShapes([{ ...shape, id: newId(), path, subpaths: undefined, style: { ...shape.style, fill: null } }]);
+  };
+  return (
+    <Section title="Linha paralela">
+      <Row label="Distância na peça">
+        <span className="num">
+          <input id="par-dist" type="number" defaultValue={10} step={1} min={0.5} />
+          mm
+        </span>
+      </Row>
+      <div className="btnrow">
+        <button className="ghost" onClick={() => make(1)}>De um lado</button>
+        <button className="ghost" onClick={() => make(-1)}>Do outro</button>
+      </div>
+    </Section>
+  );
+}
+
+function DrawToolProps() {
+  const s = useEditor();
+  if (s.tool === 'brush' || s.tool === 'pencil')
+    return (
+      <Section title={s.tool === 'brush' ? 'Pincel (ferramenta)' : 'Lápis (ferramenta)'}>
+        {s.tool === 'brush' && <BrushEditor brush={s.brush} onChange={(b) => b && editor.set({ brush: b })} />}
+        <Row label="Suavização">
+          <input type="range" min={0.5} max={8} step={0.5} value={s.smooth} onChange={(e) => editor.set({ smooth: Number(e.target.value) })} />
+        </Row>
+        <Row label="Cor">
+          <input type="color" value={s.style.stroke ?? '#000000'} onChange={(e) => editor.set({ style: { ...s.style, stroke: e.target.value } })} />
+        </Row>
+        {s.tool === 'pencil' && (
+          <Row label="Espessura">
+            <Num value={s.style.width} min={0.05} step={0.05} onChange={(v) => editor.set({ style: { ...s.style, width: v } })} />
+          </Row>
+        )}
+      </Section>
+    );
+  if (s.tool === 'polygon')
+    return (
+      <Section title="Polígono e estrela">
+        <Row label="Lados / pontas">
+          <Num value={s.poly.sides} step={1} min={3} max={40} suffix="" onChange={(v) => editor.set({ poly: { ...s.poly, sides: Math.round(v) } })} />
+        </Row>
+        <Row label="Estrela">
+          <input type="checkbox" checked={s.poly.star} onChange={(e) => editor.set({ poly: { ...s.poly, star: e.target.checked } })} />
+        </Row>
+        {s.poly.star && (
+          <Row label="Raio interno">
+            <input type="range" min={0.15} max={0.9} step={0.05} value={s.poly.inner} onChange={(e) => editor.set({ poly: { ...s.poly, inner: Number(e.target.value) } })} />
+          </Row>
+        )}
+      </Section>
+    );
+  return null;
+}
+
+const KIND_LABEL: Record<Shape['kind'], string> = { path: 'Traço', stitch: 'Pesponto', trim: 'Aviamento', text: 'Texto', group: 'Grupo', image: 'Imagem', dim: 'Cota' };
 
 function DocProps() {
   const s = useEditor();
@@ -442,6 +589,7 @@ export function Props() {
   return (
     <aside className="dock" data-help="props">
       {s.tool === 'stitch' && <StitchToolProps />}
+      <DrawToolProps />
       {sel.length ? <SelectionProps sel={sel} /> : <DocProps />}
       <Layers />
     </aside>

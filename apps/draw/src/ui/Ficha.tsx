@@ -6,7 +6,7 @@ import { IconExternalLink, IconLink, IconPlus, IconTrash, IconWand } from '@tabl
 import { type ReactNode, useMemo } from 'react';
 import { type Aviamento, type Cor, type Ficha, type FichaStatus, type Lavagem, type Material, type Medida, type Operacao, STATUS_LABEL } from '../model/ficha';
 import { bboxOfShapes } from '../model/geom';
-import { defsSvg, shapeSvg } from '../model/svg';
+import { defsSvg, setDimScale, shapeSvg } from '../model/svg';
 import { STITCH_LABEL } from '../model/stitch';
 import { TRIM_LABEL } from '../model/trims';
 import type { Shape } from '../model/types';
@@ -214,6 +214,7 @@ export function FichaView() {
   const f = s.doc.ficha;
   const drawing = useMemo(() => {
     // enquadra só o desenho (sem a camada de croqui), com uma folga
+    setDimScale(s.doc.scale);
     const shapes = s.doc.layers.filter((l) => l.visible && l.id !== 'croqui').flatMap((l) => l.shapes);
     const b = bboxOfShapes(shapes);
     const pad = b ? Math.max(b.maxX - b.minX, b.maxY - b.minY) * 0.04 : 0;

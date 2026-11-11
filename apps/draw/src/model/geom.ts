@@ -83,6 +83,12 @@ export function shapeBBox(sh: Shape): BBox | null {
     }
     case 'image':
       return { minX: sh.at.x, minY: sh.at.y, maxX: sh.at.x + sh.w, maxY: sh.at.y + sh.h };
+    case 'dim': {
+      const dx = sh.b.x - sh.a.x, dy = sh.b.y - sh.a.y, L = Math.hypot(dx, dy) || 1;
+      const n = { x: dy / L, y: -dx / L };
+      const pts = [sh.a, sh.b, { x: sh.a.x + n.x * (sh.off + sh.size), y: sh.a.y + n.y * (sh.off + sh.size) }, { x: sh.b.x + n.x * (sh.off + sh.size), y: sh.b.y + n.y * (sh.off + sh.size) }];
+      return bboxOfPoints(pts);
+    }
     case 'text': {
       const w = sh.text.length * sh.size * 0.55;
       return { minX: sh.at.x, minY: sh.at.y - sh.size, maxX: sh.at.x + w, maxY: sh.at.y + sh.size * 0.25 };
@@ -158,6 +164,12 @@ export function transformShape(sh: Shape, m: Affine): Shape {
   switch (sh.kind) {
     case 'path':
       return withAxis({ ...sh, path: mapPath(sh.path, f), ...(sh.subpaths ? { subpaths: sh.subpaths.map((p) => mapPath(p, f)) } : {}) });
+    case 'dim': {
+      const k = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
+      // espelhar troca o lado da linha de cota
+      const flip = m.a * m.d - m.b * m.c < 0 ? -1 : 1;
+      return { ...sh, a: f(sh.a), b: f(sh.b), off: sh.off * k * flip };
+    }
     case 'image': {
       // imagem acompanha a caixa (sem girar)
       const pts = [sh.at, { x: sh.at.x + sh.w, y: sh.at.y }, { x: sh.at.x + sh.w, y: sh.at.y + sh.h }, { x: sh.at.x, y: sh.at.y + sh.h }].map(f);
@@ -259,8 +271,10 @@ export function dedupe(pts: Vec2[], eps = 1e-6): Vec2[] {
   return pts.filter((p, i) => i === 0 || dist(p, pts[i - 1]!) > eps);
 }
 
-export const polyPath = (pts: Vec2[], closed = false): Path => ({
-  start: pts[0]!,
-  segments: pts.slice(1).map((to) => ({ kind: 'line' as const, to })),
-  closed,
-});
+/** Poligonal → caminho. Fechado ganha o lado que volta ao início (mesma convenção do núcleo). */
+export const polyPath = (pts: Vec2[], closed = false): Path => {
+  const segs = pts.slice(1).map((to) => ({ kind: 'line' as const, to }));
+  const first = pts[0]!, last = pts[pts.length - 1]!;
+  if (closed && pts.length > 1 && (first.x !== last.x || first.y !== last.y)) segs.push({ kind: 'line' as const, to: { ...first } });
+  return { start: first, segments: segs, closed };
+};

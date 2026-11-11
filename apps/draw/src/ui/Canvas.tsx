@@ -2,12 +2,13 @@
  * Área de desenho: SVG com zoom/arrasto, seleção com alças de escala, edição de pontos,
  * caneta (com simetria), formas, pesponto ao longo do traço, aviamentos e balde de tecido.
  */
-import { type BBox, type Path, type Vec2, dist, flattenPath } from '@cad-textil/core';
+import { type BBox, type Path, type Vec2, dist, flattenPath, pathThroughPoints } from '@cad-textil/core';
+import { arcPath, freehandPath, polygonPath, splitPathAt } from '../model/draw-tools';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type Affine, anchors, bboxOfShapes, cumLength, mirrored, mirrorX, pathD, polyPath, projectOn, scaleAbout, shapeBBox, translateM } from '../model/geom';
 import { stitchAlong, stitchLine } from '../model/stitch';
-import { defsSvg, shapeSvg } from '../model/svg';
-import type { PathShape, Shape, StitchShape, TextShape, TrimShape } from '../model/types';
+import { defsSvg, setDimScale, shapeSvg } from '../model/svg';
+import type { DimShape, PathShape, Shape, StitchShape, TextShape, TrimShape } from '../model/types';
 import {
   type EditorState,
   addShapes,
@@ -15,11 +16,13 @@ import {
   findShape,
   newId,
   notify,
+  replaceDeep,
   resolveShape,
   selectedShapes,
   transformSelected,
   trimDefaultSize,
   updateDeep,
+  updateShapes,
   useEditor,
 } from '../state';
 
@@ -41,7 +44,8 @@ type Drag =
   | { kind: 'scale'; h: Handle; box: BBox; start: Vec2; cur: Vec2; shift: boolean; alt: boolean }
   | { kind: 'marquee'; start: Vec2; cur: Vec2; add: boolean }
   | { kind: 'pan'; sx: number; sy: number; v0: ViewT }
-  | { kind: 'shape'; tool: 'rect' | 'ellipse' | 'line'; start: Vec2; cur: Vec2 }
+  | { kind: 'shape'; tool: 'rect' | 'ellipse' | 'line' | 'arc' | 'polygon' | 'dim'; start: Vec2; cur: Vec2; shift?: boolean; alt?: boolean }
+  | { kind: 'free'; pts: Vec2[] }
   | { kind: 'anchor'; t: Target; path0: Path; which: 'p' | 'c1' | 'c2'; idx: number; start: Vec2; cur: Vec2 }
   | { kind: 'pen'; start: Vec2; cur: Vec2 };
 
@@ -60,7 +64,8 @@ interface StitchPick {
   poly: Vec2[] | null;
 }
 
-const svgCache = new WeakMap<Shape, string>();
+let svgCache = new WeakMap<Shape, string>();
+let cacheScale = 0;
 const cached = (s: Shape) => {
   let v = svgCache.get(s);
   if (v === undefined) {
@@ -184,6 +189,9 @@ export function Canvas() {
   const [pen, setPen] = useState<PenPt[]>([]);
   const penRef = useRef(pen);
   penRef.current = pen;
+  const [curve, setCurve] = useState<{ p: Vec2; corner: boolean }[]>([]);
+  const curveRef = useRef(curve);
+  curveRef.current = curve;
   const [hover, setHover] = useState<Vec2 | null>(null);
   const [edit, setEdit] = useState<Target | null>(null);
   const [pick, setPick] = useState<StitchPick | null>(null);
@@ -230,8 +238,10 @@ export function Canvas() {
         if (e.target === document.body) e.preventDefault();
       }
       if (e.key === 'Enter' && penRef.current.length) finishPen(false);
+      if (e.key === 'Enter' && curveRef.current.length) finishCurve(false);
       if (e.key === 'Escape') {
         if (penRef.current.length) finishPen(false);
+        if (curveRef.current.length) finishCurve(false);
         setPick(null);
         setEdit(null);
       }
@@ -250,6 +260,7 @@ export function Canvas() {
   // trocar de ferramenta encerra a caneta / pesponto
   useEffect(() => {
     if (s.tool !== 'pen' && penRef.current.length) finishPen(false);
+    if (s.tool !== 'curvature' && curveRef.current.length) finishCurve(false);
     if (s.tool !== 'stitch') setPick(null);
     if (s.tool !== 'direct') setEdit(null);
   }, [s.tool]);
@@ -279,6 +290,18 @@ export function Canvas() {
     const shape: PathShape = { kind: 'path', id: newId(), path, style: { ...st.style }, ...(sym ? { mirror: st.axis } : {}) };
     if (!close && !(sym && mirrored(path, st.axis).length === 1)) shape.style = { ...shape.style, fill: null };
     addShapes([shape]);
+  }
+
+  /* ---------------- curvatura ---------------- */
+  function finishCurve(close: boolean) {
+    const pts = curveRef.current;
+    setCurve([]);
+    if (pts.length < 2) return;
+    const st = editor.get();
+    const path = pathThroughPoints(pts.map((q, i) => ({ p: q.p, corner: q.corner || (!close && (i === 0 || i === pts.length - 1)) })), close);
+    const sym = st.symmetry;
+    const joins = sym && mirrored(path, st.axis).length === 1;
+    addShapes([{ kind: 'path', id: newId(), path, style: { ...st.style, fill: close || joins ? st.style.fill : null }, ...(sym ? { mirror: st.axis } : {}) }]);
   }
 
   /* ---------------- pesponto ---------------- */
@@ -331,7 +354,11 @@ export function Canvas() {
   const onPointerDown = (e: React.PointerEvent) => {
     const st = editor.get();
     const p = toDoc(e);
-    svgRef.current!.setPointerCapture(e.pointerId);
+    try {
+      svgRef.current!.setPointerCapture(e.pointerId);
+    } catch {
+      /* ponteiro sem captura (ex.: caneta de mesa digitalizadora em alguns sistemas) */
+    }
     if (e.button === 1 || space || st.tool === 'hand') {
       setDrag({ kind: 'pan', sx: e.clientX, sy: e.clientY, v0: viewRef.current });
       return;
@@ -405,11 +432,60 @@ export function Canvas() {
         setDrag({ kind: 'pen', start: q, cur: q });
         return;
       }
+      case 'curvature': {
+        const q = snapAxis(p);
+        const pts = curveRef.current;
+        if (pts.length >= 2 && dist(q, pts[0]!.p) < 8 / view.z) {
+          finishCurve(true);
+          return;
+        }
+        setCurve([...pts, { p: q, corner: e.altKey }]);
+        return;
+      }
+      case 'pencil':
+      case 'brush':
+        setDrag({ kind: 'free', pts: [snapAxis(p)] });
+        return;
       case 'rect':
       case 'ellipse':
       case 'line':
-        setDrag({ kind: 'shape', tool: st.tool, start: snapAxis(p), cur: snapAxis(p) });
+      case 'arc':
+      case 'polygon':
+      case 'dim':
+        setDrag({ kind: 'shape', tool: st.tool, start: snapAxis(p), cur: snapAxis(p), shift: e.shiftKey, alt: e.altKey });
         return;
+      case 'scissors': {
+        if (!hit) return;
+        const sh = resolveShape(st.doc, hit.sid, hit.cid);
+        if (!sh || sh.kind !== 'path') {
+          notify('A tesoura corta traços e contornos', 'erro');
+          return;
+        }
+        const target = sh.mirror !== undefined && Math.sign(p.x - sh.mirror) !== Math.sign(flattenPath(sh.path, 1)[0]!.x - sh.mirror) ? mirrorX(sh.mirror)(p) : p;
+        const parts = splitPathAt(sh.path, target);
+        replaceDeep(hit.sid, hit.cid, (x) =>
+          x.kind === 'path' ? parts.map((path, i) => ({ ...x, id: i === 0 ? x.id : newId(), path, subpaths: undefined, style: { ...x.style, fill: path.closed ? x.style.fill : null } })) : [x],
+        );
+        notify(parts.length === 2 ? 'Traço cortado em dois' : sh.path.closed ? 'Contorno aberto no ponto clicado' : 'O corte caiu na ponta do traço');
+        return;
+      }
+      case 'eyedropper': {
+        if (!hit) return;
+        const sh = resolveShape(st.doc, hit.sid, hit.cid);
+        if (!sh) return;
+        if (sh.kind === 'path') {
+          editor.set({ style: { ...sh.style } });
+          if (st.selection.length) {
+            const map = (x: Shape): Shape => (x.kind === 'path' ? { ...x, style: { ...sh.style } } : x.kind === 'group' ? { ...x, children: x.children.map(map) } : x);
+            updateShapes(st.selection, map);
+            notify('Estilo copiado para a seleção');
+          } else notify('Estilo copiado: os próximos desenhos usam este traço');
+        } else if (sh.kind === 'stitch') {
+          editor.set((s0) => ({ stitch: { ...s0.stitch, type: sh.stitch.type, color: sh.stitch.color, gap: sh.stitch.gap * s0.doc.scale, len: sh.stitch.len * s0.doc.scale } }));
+          notify('Pesponto copiado para a ferramenta Pesponto');
+        }
+        return;
+      }
       case 'text': {
         const t: TextShape = { kind: 'text', id: newId(), at: p, text: 'Texto', size: 4, color: st.style.stroke ?? '#1b1b1f' };
         addShapes([t]);
@@ -482,8 +558,20 @@ export function Canvas() {
       setDrag({ ...d, cur: p });
       return;
     }
+    if (d.kind === 'free') {
+      const last = d.pts[d.pts.length - 1]!;
+      if (dist(last, p) > 1.2 / view.z) setDrag({ kind: 'free', pts: [...d.pts, p] });
+      return;
+    }
     if (d.kind === 'scale') setDrag({ ...d, cur: p, shift: e.shiftKey, alt: e.altKey });
-    else if (d.kind === 'shape') setDrag({ ...d, cur: e.shiftKey && d.tool !== 'line' ? square(d.start, p) : snapAxis(p) });
+    else if (d.kind === 'shape') {
+      const mod = { shift: e.shiftKey, alt: e.altKey };
+      if ((d.tool === 'line' || d.tool === 'dim') && e.shiftKey) {
+        const dx = p.x - d.start.x, dy = p.y - d.start.y;
+        setDrag({ ...d, ...mod, cur: Math.abs(dx) > Math.abs(dy) ? { x: p.x, y: d.start.y } : { x: d.start.x, y: p.y } });
+      } else if (d.tool === 'polygon' || d.tool === 'arc') setDrag({ ...d, ...mod, cur: p });
+      else setDrag({ ...d, ...mod, cur: e.shiftKey && d.tool !== 'line' ? square(d.start, p) : snapAxis(p) });
+    }
     else if (d.kind === 'move' && e.shiftKey) {
       const dx = p.x - d.start.x, dy = p.y - d.start.y;
       setDrag({ ...d, cur: Math.abs(dx) > Math.abs(dy) ? { x: p.x, y: d.start.y } : { x: d.start.x, y: p.y } });
@@ -518,16 +606,36 @@ export function Canvas() {
         editor.set({ selection: d.add ? [...new Set([...st.selection, ...ids])] : ids });
         return;
       }
+      case 'free': {
+        if (d.pts.length < 2) return;
+        const z = viewRef.current.z;
+        const first = d.pts[0]!, last = snapAxis(d.pts[d.pts.length - 1]!);
+        const pts = [...d.pts.slice(0, -1), last];
+        const closed = pts.length > 8 && dist(first, last) < 10 / z;
+        const path = freehandPath(pts, st.smooth / z, closed);
+        if (!path) return;
+        const sym = st.symmetry;
+        const joins = sym && mirrored(path, st.axis).length === 1;
+        const brush = st.tool === 'brush';
+        const style = brush ? { ...st.style, fill: null, brush: { ...st.brush } } : { ...st.style, brush: undefined, fill: closed || joins ? st.style.fill : null };
+        addShapes([{ kind: 'path', id: newId(), path, style, ...(sym ? { mirror: st.axis } : {}) }], false);
+        return;
+      }
       case 'shape': {
         const { start: a, cur: b } = d;
         if (dist(a, b) < 0.5) return;
-        let path: Path;
-        if (d.tool === 'line') path = polyPath([a, b]);
-        else if (d.tool === 'rect') path = polyPath([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }], true);
-        else path = ellipsePath((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2);
-        const crosses = Math.min(a.x, b.x) < st.axis - 0.01 && Math.max(a.x, b.x) > st.axis + 0.01;
+        if (d.tool === 'dim') {
+          const dim: DimShape = { kind: 'dim', id: newId(), a, b, off: 4, color: '#1b1b1f', size: 3.2 };
+          addShapes([dim]);
+          notify('Cota criada · o valor é a medida real da peça (escala do documento). Dá para trocar o texto no painel.');
+          return;
+        }
+        const path = shapePath(d, st.poly);
+        const ext = d.tool === 'polygon' ? { minX: a.x - dist(a, b), maxX: a.x + dist(a, b) } : { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x) };
+        const crosses = ext.minX < st.axis - 0.01 && ext.maxX > st.axis + 0.01;
         const sym = st.symmetry && !crosses;
-        const shape: PathShape = { kind: 'path', id: newId(), path, style: { ...st.style, fill: d.tool === 'line' ? null : st.style.fill }, ...(sym ? { mirror: st.axis } : {}) };
+        const open = d.tool === 'line' || d.tool === 'arc';
+        const shape: PathShape = { kind: 'path', id: newId(), path, style: { ...st.style, fill: open ? null : st.style.fill }, ...(sym ? { mirror: st.axis } : {}) };
         addShapes([shape]);
         return;
       }
@@ -552,9 +660,19 @@ export function Canvas() {
 
   const onDoubleClick = () => {
     if (editor.get().tool === 'pen' && penRef.current.length) finishPen(false);
+    if (editor.get().tool === 'curvature' && curveRef.current.length) {
+      // o duplo clique acrescentou um ponto repetido no último clique
+      setCurve(curveRef.current.slice(0, -1));
+      setTimeout(() => finishCurve(false), 0);
+    }
   };
 
   /* ---------------- desenho ---------------- */
+  if (cacheScale !== s.doc.scale) {
+    cacheScale = s.doc.scale;
+    setDimScale(s.doc.scale);
+    svgCache = new WeakMap();
+  }
   const allShapes = useMemo(() => s.doc.layers.filter((l) => l.visible).flatMap((l) => l.shapes), [s.doc.layers]);
   const defs = useMemo(() => defsSvg(allShapes), [allShapes]);
   const selSet = new Set(s.selection);
@@ -673,7 +791,34 @@ export function Canvas() {
         )}
 
         {/* forma sendo desenhada */}
-        {drag?.kind === 'shape' && <ShapePreview d={drag} w={px(1.2)} axis={s.symmetry ? s.axis : null} />}
+        {drag?.kind === 'shape' && <ShapePreview d={drag} w={px(1.2)} axis={s.symmetry ? s.axis : null} poly={s.poly} />}
+
+        {/* lápis / pincel */}
+        {drag?.kind === 'free' && (
+          <g className="pen">
+            <path d={pathD(polyPath(drag.pts))} fill="none" strokeWidth={s.tool === 'brush' ? s.brush.size : px(1.2)} strokeLinecap="round" strokeLinejoin="round" opacity={s.tool === 'brush' ? 0.6 : 1} />
+            {s.symmetry && <path d={pathD(polyPath(drag.pts.map(mirrorX(s.axis))))} fill="none" strokeWidth={px(1)} strokeDasharray={`${px(4)} ${px(3)}`} />}
+          </g>
+        )}
+
+        {/* curvatura */}
+        {curve.length > 0 && (() => {
+          const pts = hover ? [...curve, { p: snapAxis(hover), corner: false }] : curve;
+          const path = pts.length > 1 ? pathThroughPoints(pts.map((q, i) => ({ p: q.p, corner: q.corner || i === 0 || i === pts.length - 1 })), false) : null;
+          return (
+            <g className="pen">
+              {path && <path d={pathD(path)} fill="none" strokeWidth={px(1.2)} />}
+              {path && s.symmetry && <path d={pathD(mirrored(path, s.axis)[1] ?? mirrored(path, s.axis)[0]!)} fill="none" strokeWidth={px(1)} strokeDasharray={`${px(4)} ${px(3)}`} />}
+              {curve.map((q, i) =>
+                q.corner ? (
+                  <rect key={i} x={q.p.x - hs / 2} y={q.p.y - hs / 2} width={hs} height={hs} strokeWidth={px(1)} className={i === 0 ? 'first' : ''} />
+                ) : (
+                  <circle key={i} cx={q.p.x} cy={q.p.y} r={hs / 2} strokeWidth={px(1)} className={i === 0 ? 'first' : ''} />
+                ),
+              )}
+            </g>
+          );
+        })()}
 
         {/* pesponto: primeiro ponto + prévia */}
         {s.tool === 'stitch' && pick && hover && <StitchPreview pick={pick} hover={unmirror(hover, pick)} st={s} make={makeStitch} r={px(4)} />}
@@ -694,13 +839,35 @@ export function Canvas() {
   );
 }
 
-function ShapePreview({ d, w, axis }: { d: Extract<Drag, { kind: 'shape' }>; w: number; axis: number | null }) {
+/** Caminho da forma arrastada (retângulo, elipse, linha, arco, polígono). */
+function shapePath(d: Extract<Drag, { kind: 'shape' }>, poly: EditorState['poly']): Path {
   const { start: a, cur: b } = d;
-  let path: Path;
-  if (d.tool === 'line') path = polyPath([a, b]);
-  else if (d.tool === 'rect') path = polyPath([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }], true);
-  else path = ellipsePath((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2);
-  const crosses = axis !== null && Math.min(a.x, b.x) < axis - 0.01 && Math.max(a.x, b.x) > axis + 0.01;
+  switch (d.tool) {
+    case 'line':
+      return polyPath([a, b]);
+    case 'rect':
+      return polyPath([a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }], true);
+    case 'arc':
+      return arcPath(a, b, !!d.alt);
+    case 'polygon': {
+      let rot = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90;
+      if (d.shift) rot = Math.round(rot / 15) * 15;
+      return polygonPath(a, dist(a, b), poly.sides, rot, poly.star ? poly.inner : undefined);
+    }
+    default:
+      return ellipsePath((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2);
+  }
+}
+
+function ShapePreview({ d, w, axis, poly }: { d: Extract<Drag, { kind: 'shape' }>; w: number; axis: number | null; poly: EditorState['poly'] }) {
+  const { start: a, cur: b } = d;
+  if (d.tool === 'dim') {
+    const dim: DimShape = { kind: 'dim', id: 'prev', a, b, off: 4, color: '#6d7cff', size: 3.2 };
+    return <g dangerouslySetInnerHTML={{ __html: shapeSvg(dim) }} />;
+  }
+  const path = shapePath(d, poly);
+  const ext = d.tool === 'polygon' ? [a.x - dist(a, b), a.x + dist(a, b)] : [Math.min(a.x, b.x), Math.max(a.x, b.x)];
+  const crosses = axis !== null && ext[0]! < axis - 0.01 && ext[1]! > axis + 0.01;
   return (
     <g className="pen">
       <path d={pathD(path)} fill="none" strokeWidth={w} />

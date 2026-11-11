@@ -27,7 +27,7 @@ Ou baixe os apps separados:
 
 ## Andromeda Draw — desenho de moda e ficha técnica
 
-- **Desenho vetorial** inspirado no Illustrator: seleção, seleção direta (pontos e alças), caneta com curvas, linha, retângulo, elipse, texto, camadas, agrupar, desfazer.
+- **Desenho vetorial** inspirado no Illustrator: seleção, seleção direta (pontos e alças), caneta, curvatura, lápis à mão livre (suavizado), pincel (caligráfico, afinado nas pontas, marcador e grafite), linha, arco, retângulo, elipse, polígono e estrela, texto, cota com a medida real da peça, tesoura, conta-gotas, linha paralela, tipos de linha (tracejada, pontilhada, traço e ponto), camadas, agrupar, desfazer.
 - **Simetria:** desenhe metade da peça e o outro lado acompanha; meio contorno que fecha no eixo vira a peça inteira.
 - **Pespontos que acompanham o traço:** simples, duplo, triplo, zigue-zague, galoneira, overloque, corrente, alinhavo, zíper, franzido e elástico — com distância da borda e entre agulhas em medidas reais da peça.
 - **Biblioteca:** peças base paramétricas (camiseta, regata, camisa social, moletom, calça jeans 5 bolsos, shorts, saia, vestido — com opções de gola, manga, modelagem e medidas), detalhes (bolsos, golas, punhos, passantes, zíper, cordão), aviamentos (botões, ilhós, rebite, colchete, fivela, etiqueta, cursor…), tecidos como preenchimento (jeans, listras, xadrez, vichy, poá, canelado, tricô, pied-de-poule…) e croquis em 9 cabeças.

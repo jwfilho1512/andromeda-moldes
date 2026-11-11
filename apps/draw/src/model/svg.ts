@@ -2,11 +2,31 @@
  * Desenho → SVG (texto). A mesma função desenha a tela e o arquivo exportado, então o que se vê
  * é exatamente o que sai.
  */
+import { brushRender } from './brush';
+import { dimGeometry, dimValueCm, fmtCm } from './draw-tools';
 import { mirrored, mirrorX, pathD } from './geom';
 import { fillValue, patternDef } from './patterns';
 import { stitchShapeStrokes } from './stitch';
 import { trimParts } from './trims';
-import type { DrawDoc, Fill, Shape, TrimShape } from './types';
+import type { DimShape, DrawDoc, Fill, Shape, TrimShape } from './types';
+
+/** Escala do documento usada para o valor das cotas (ajustada por quem desenha). */
+let docScale = 5;
+export const setDimScale = (s: number) => {
+  docScale = s;
+};
+
+function dimSvg(d: DimShape): string {
+  const g = dimGeometry(d);
+  const L = (a: { x: number; y: number }, b: { x: number; y: number }) => `M${n(a.x)} ${n(a.y)}L${n(b.x)} ${n(b.y)}`;
+  const w = Math.max(0.1, d.size * 0.05);
+  const label = d.text ?? fmtCm(dimValueCm(d, docScale));
+  return (
+    `<path d="${g.ext.map(([a, b]) => L(a, b)).join('')}${L(g.line[0], g.line[1])}" fill="none" stroke="${d.color}" stroke-width="${w}"/>` +
+    g.arrows.map((a) => `<path d="M${a.map((p) => `${n(p.x)} ${n(p.y)}`).join('L')}" fill="none" stroke="${d.color}" stroke-width="${w}" stroke-linejoin="round"/>`).join('') +
+    `<text x="${n(g.text.at.x)}" y="${n(g.text.at.y)}" transform="rotate(${n(g.text.angle)} ${n(g.text.at.x)} ${n(g.text.at.y)})" font-size="${d.size}" fill="${d.color}" text-anchor="middle" dominant-baseline="middle" font-family="Helvetica, Arial, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="${d.size * 0.25}">${esc(label)}</text>`
+  );
+}
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const n = (x: number) => Math.round(x * 1000) / 1000;
@@ -34,12 +54,23 @@ export function shapeSvg(sh: Shape, hit = 0): string {
       const dash = st.dash?.length ? ` stroke-dasharray="${st.dash.join(' ')}"` : '';
       const extra = sh.subpaths?.map(pathD).join('') ?? '';
       const rule = sh.fillRule === 'evenodd' ? ' fill-rule="evenodd"' : '';
+      const cap = st.cap ?? 'round';
       return paths
         .map((p, i) => {
           const d = pathD(p) + (i === 0 ? extra : '');
           const closed = p.closed || (!!extra && i === 0);
           const fill = closed ? fillValue(st.fill) : 'none';
-          const main = `<path d="${d}" fill="${fill}"${rule} stroke="${st.stroke ?? 'none'}" stroke-width="${st.width}" stroke-linejoin="round" stroke-linecap="round"${dash}/>`;
+          let main: string;
+          if (st.brush && st.stroke) {
+            // pincel: preenchimento da forma + traço desenhado como contorno de espessura variável
+            const br = brushRender(p, st.brush);
+            const op = st.brush.kind === 'marcador' ? ' fill-opacity="0.82"' : '';
+            main =
+              (fill !== 'none' ? `<path d="${d}" fill="${fill}"${rule} stroke="none"/>` : '') +
+              (br.fill ? `<path d="${br.fill}" fill="${st.stroke}"${op} fill-rule="nonzero" stroke="none"/>` : '') +
+              br.strokes.map((s) => `<path d="${s.d}" fill="none" stroke="${st.stroke}" stroke-width="${s.width}" stroke-opacity="${s.opacity}" stroke-linecap="round" stroke-linejoin="round"/>`).join('');
+          } else
+            main = `<path d="${d}" fill="${fill}"${rule} stroke="${st.stroke ?? 'none'}" stroke-width="${st.width}" stroke-linejoin="${cap === 'butt' ? 'miter' : 'round'}" stroke-linecap="${cap}"${dash}/>`;
           const h = hit ? `<path d="${d}" fill="${closed && st.fill ? 'transparent' : 'none'}" stroke="transparent" stroke-width="${hit}" class="hit"/>` : '';
           return main + h;
         })
@@ -58,6 +89,12 @@ export function shapeSvg(sh: Shape, hit = 0): string {
     }
     case 'trim':
       return trimSvg(sh) + (sh.mirror !== undefined ? trimSvg(sh, mirrorX(sh.mirror)(sh.at), true) : '');
+    case 'dim': {
+      const body = dimSvg(sh);
+      if (!hit) return body;
+      const g = dimGeometry(sh);
+      return body + `<path d="M${n(sh.a.x)} ${n(sh.a.y)}L${n(g.line[0].x)} ${n(g.line[0].y)}L${n(g.line[1].x)} ${n(g.line[1].y)}L${n(sh.b.x)} ${n(sh.b.y)}" fill="none" stroke="transparent" stroke-width="${hit}" class="hit"/>`;
+    }
     case 'image':
       return `<image href="${sh.href}" x="${n(sh.at.x)}" y="${n(sh.at.y)}" width="${n(sh.w)}" height="${n(sh.h)}" preserveAspectRatio="none" opacity="${sh.opacity}"/>`;
     case 'text': {
@@ -92,6 +129,7 @@ export function defsSvg(shapes: Shape[]): string {
 
 /** Documento inteiro como arquivo SVG em escala (mm). */
 export function docToSvg(doc: DrawDoc, opts: { background?: boolean } = {}): string {
+  setDimScale(doc.scale);
   const shapes = doc.layers.filter((l) => l.visible).flatMap((l) => l.shapes);
   const { w, h } = doc.artboard;
   return (

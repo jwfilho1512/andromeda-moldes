@@ -92,6 +92,8 @@ export function group(name: string, children: Shape[], at: Vec2 = { x: 0, y: 0 }
       case 'text':
       case 'image':
         return { ...s, ...m, at: f(s.at) };
+      case 'dim':
+        return { ...s, a: f(s.a), b: f(s.b) };
       case 'group':
         return { ...s, ...m, children: s.children.map(move) };
     }

@@ -50,6 +50,17 @@ export type Fill =
   | { kind: 'solid'; color: string }
   | { kind: 'pattern'; pattern: PatternKind; c1: string; c2: string; scale: number; angle: number };
 
+/** Pincel: traço com espessura variável (desenhado como forma vetorial). */
+export type BrushKind = 'caligrafico' | 'afinado' | 'marcador' | 'grafite';
+
+export interface Brush {
+  kind: BrushKind;
+  /** Espessura máxima (mm). */
+  size: number;
+  /** Ângulo da ponta caligráfica (graus). */
+  angle?: number;
+}
+
 export interface Style {
   stroke: string | null;
   /** Espessura do traço (mm). */
@@ -57,6 +68,10 @@ export interface Style {
   fill: Fill | null;
   /** Traço tracejado (mm), ex.: [2, 1]. */
   dash?: number[];
+  /** Pontas e cantos do traço. */
+  cap?: 'round' | 'butt' | 'square';
+  /** Pincel (substitui o traço comum). */
+  brush?: Brush;
 }
 
 export type TrimKind =
@@ -132,7 +147,21 @@ export interface GroupShape extends ShapeBase {
   children: Shape[];
 }
 
-export type Shape = PathShape | StitchShape | TrimShape | TextShape | GroupShape | ImageShape;
+/** Cota: linha de medida entre dois pontos, com o valor real da peça (pela escala do documento). */
+export interface DimShape extends ShapeBase {
+  kind: 'dim';
+  a: Vec2;
+  b: Vec2;
+  /** Afastamento da linha de cota em relação aos pontos (mm, + = esquerda de a→b). */
+  off: number;
+  color: string;
+  /** Tamanho do texto (mm). */
+  size: number;
+  /** Texto fixo (ex.: "Busto 51 cm"); sem ele mostra a medida calculada. */
+  text?: string;
+}
+
+export type Shape = PathShape | StitchShape | TrimShape | TextShape | GroupShape | ImageShape | DimShape;
 
 export interface Layer {
   id: string;
