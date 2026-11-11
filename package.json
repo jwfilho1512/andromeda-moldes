@@ -1,7 +1,7 @@
 {
   "name": "cad-textil",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Andromeda Fashion Studio: Draw (desenho e ficha técnica), Moldes (modelagem 2D, risco e encaixe) e 3D",
   "workspaces": [
     "packages/*",
