@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('hub', {
   reveal: (path: string) => ipcRenderer.invoke('reveal', path),
   openExternal: (url: string) => ipcRenderer.invoke('openExternal', url),
   info: () => ipcRenderer.invoke('info'),
+  hubUpdate: (force: boolean) => ipcRenderer.invoke('hubUpdate', force),
+  updateHub: () => ipcRenderer.invoke('updateHub'),
   onInstallProgress: (cb: (p: { id: string; phase: string; f: number }) => void) => {
     const l = (_e: unknown, p: { id: string; phase: string; f: number }) => cb(p);
     ipcRenderer.on('installProgress', l);

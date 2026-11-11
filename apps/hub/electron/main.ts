@@ -3,8 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { newDocument, serializeDocument } from '@cad-textil/core';
-import { APPS, type AppId, RELEASES_URL, groupProducts, newDrawDoc, pickAsset, productFolderName } from './catalog';
-import { detect, downloadAndInstall, latestRelease, openApp, scanWorkspace } from './system';
+import { APPS, type AppId, HUB, RELEASES_URL, compareVersions, groupProducts, newDrawDoc, pickAsset, productFolderName, selfUpdateBlocker } from './catalog';
+import { detect, downloadAndInstall, latestRelease, openApp, scanWorkspace, updateSelf } from './system';
 
 const isMac = process.platform === 'darwin';
 const APP_NAME = 'Andromeda Fashion Studio';
@@ -130,6 +130,41 @@ ipcMain.handle('reveal', (_e, path: string) => shell.showItemInFolder(path));
 ipcMain.handle('openExternal', (_e, url: string) => {
   if (url.startsWith(`https://github.com/`) && url.includes('andromeda-moldes')) void shell.openExternal(url);
   else if (url === RELEASES_URL) void shell.openExternal(url);
+});
+
+/** Há versão nova do próprio hub? */
+ipcMain.handle('hubUpdate', async (_e, force: boolean) => {
+  try {
+    const r = await latestRelease(force);
+    const asset = pickAsset(r.assets, HUB, process.platform, process.arch);
+    const newer = compareVersions(r.version, app.getVersion()) > 0;
+    return { ok: true, current: app.getVersion(), latest: r.version, available: newer && !!asset, blocker: newer ? selfUpdateBlocker(process.platform, process.execPath, app.isPackaged) : null };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+});
+
+let selfUpdating = false;
+ipcMain.handle('updateHub', async () => {
+  if (selfUpdating) return { ok: false, error: 'Já está atualizando' };
+  const blocker = selfUpdateBlocker(process.platform, process.execPath, app.isPackaged);
+  if (blocker) return { ok: false, error: blocker };
+  selfUpdating = true;
+  try {
+    const r = await latestRelease(true);
+    const asset = pickAsset(r.assets, HUB, process.platform, process.arch);
+    if (!asset) throw new Error('Sem instalador do hub para este computador');
+    const next = await updateSelf(asset, process.execPath, (phase, f) => win?.webContents.send('installProgress', { id: 'hub', phase, f }));
+    // dá tempo da interface mostrar "reabrindo…"
+    setTimeout(() => {
+      if (next === 'relaunch') app.relaunch();
+      app.exit(0);
+    }, 600);
+    return { ok: true };
+  } catch (err) {
+    selfUpdating = false;
+    return { ok: false, error: (err as Error).message };
+  }
 });
 
 ipcMain.handle('info', () => ({ version: app.getVersion(), platform: process.platform, arch: process.arch }));

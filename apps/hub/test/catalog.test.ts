@@ -74,3 +74,23 @@ describe('produtos', () => {
     expect(ficha.medidas.length).toBeGreaterThan(0);
   });
 });
+
+describe('atualização do próprio hub', () => {
+  it('acha o instalador do hub sem confundir com os apps', async () => {
+    const { HUB } = await import('../electron/catalog');
+    const list = [...assets, { name: 'Andromeda-Fashion-Studio-0.2.0-mac-arm64.dmg', url: 'h1', size: 1 }, { name: 'Andromeda-Fashion-Studio-0.2.0-windows-instalador.exe', url: 'h2', size: 1 }];
+    expect(pickAsset(list, HUB, 'darwin', 'arm64')?.url).toBe('h1');
+    expect(pickAsset(list, HUB, 'win32', 'x64')?.url).toBe('h2');
+    expect(pickAsset(list, draw, 'win32', 'x64')).toBeNull();
+  });
+  it('só se atualiza de onde dá para trocar o app', async () => {
+    const { selfUpdateBlocker, macBundleOf } = await import('../electron/catalog');
+    expect(selfUpdateBlocker('darwin', '/Applications/Andromeda Fashion Studio.app/Contents/MacOS/Andromeda Fashion Studio', true)).toBeNull();
+    expect(selfUpdateBlocker('darwin', '/Volumes/Andromeda Fashion Studio/Andromeda Fashion Studio.app/Contents/MacOS/x', true)).toMatch(/Aplicativos/);
+    expect(selfUpdateBlocker('darwin', '/private/var/folders/x/AppTranslocation/ABC/d/Andromeda Fashion Studio.app/Contents/MacOS/x', true)).toMatch(/temporário/);
+    expect(selfUpdateBlocker('win32', 'C:\\\\x\\\\hub.exe', false)).toMatch(/instalado/);
+    expect(selfUpdateBlocker('win32', 'C:\\\\x\\\\hub.exe', true)).toBeNull();
+    expect(macBundleOf('/Applications/A B.app/Contents/MacOS/A B')).toBe('/Applications/A B.app');
+    expect(macBundleOf('/usr/bin/node')).toBeNull();
+  });
+});

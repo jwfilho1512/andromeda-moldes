@@ -4,11 +4,11 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type AppDef, type FoundFile, type Release, type ReleaseAsset, REPO, parseRelease } from './catalog';
+import { type AppDef, type FoundFile, type Release, type ReleaseAsset, REPO, macBundleOf, parseRelease } from './catalog';
 
 const run = promisify(execFile);
 const isMac = process.platform === 'darwin';
@@ -147,6 +147,60 @@ export async function downloadAndInstall(app: AppDef, asset: ReleaseAsset, progr
     return await install(app, file);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * Atualiza o próprio hub.
+ * Mac: copia o app novo do .dmg por cima do atual (o macOS deixa trocar o app aberto) e devolve true para reabrir.
+ * Windows: roda o instalador novo em modo silencioso, que fecha o hub, instala e abre de novo (--force-run).
+ */
+export async function updateSelf(asset: ReleaseAsset, exePath: string, progress: (phase: 'baixando' | 'instalando', f: number) => void): Promise<'relaunch' | 'quit'> {
+  const dir = await mkdtemp(join(tmpdir(), 'andromeda-hub-'));
+  const file = join(dir, asset.name);
+  await download(asset, file, (f) => progress('baixando', f));
+  progress('instalando', 1);
+  if (isMac) {
+    const bundle = macBundleOf(exePath);
+    if (!bundle) throw new Error('Não achei o app do hub para trocar');
+    try {
+      await replaceMacBundle(file, bundle);
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+    return 'relaunch';
+  }
+  if (isWin) {
+    // o instalador continua sozinho depois que o hub fecha; a pasta temporária fica para o Windows limpar
+    const p = spawn(file, ['/S', '/currentuser', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
+    p.unref();
+    return 'quit';
+  }
+  throw new Error('Sistema não suportado');
+}
+
+/** Troca a pasta .app pelo app que está dentro do .dmg (cópia ao lado e troca, para não deixar o app pela metade). */
+export async function replaceMacBundle(dmg: string, bundle: string): Promise<void> {
+  const mount = await mkdtemp(join(tmpdir(), 'andromeda-dmg-'));
+  await run('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mount, dmg]);
+  try {
+    const appDir = (await readdir(mount)).find((n) => n.endsWith('.app'));
+    if (!appDir) throw new Error('O instalador não tem o app dentro');
+    const fresh = `${bundle}.novo`;
+    const old = `${bundle}.antigo`;
+    await rm(fresh, { recursive: true, force: true });
+    await run('ditto', [join(mount, appDir), fresh]);
+    await rm(old, { recursive: true, force: true });
+    await rename(bundle, old);
+    try {
+      await rename(fresh, bundle);
+    } catch (err) {
+      await rename(old, bundle).catch(() => undefined);
+      throw err;
+    }
+    await rm(old, { recursive: true, force: true }).catch(() => undefined);
+  } finally {
+    await run('hdiutil', ['detach', mount, '-quiet']).catch(() => run('hdiutil', ['detach', mount, '-force', '-quiet']).catch(() => undefined));
   }
 }
 

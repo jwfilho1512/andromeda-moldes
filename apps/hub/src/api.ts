@@ -20,6 +20,16 @@ export interface ReleaseInfo {
   assets?: Record<string, ReleaseAsset | null>;
 }
 
+export interface HubUpdate {
+  ok: boolean;
+  error?: string;
+  current?: string;
+  latest?: string;
+  available?: boolean;
+  /** Motivo de não dar para atualizar sozinho (ex.: aberto direto do .dmg). */
+  blocker?: string | null;
+}
+
 export interface Progress {
   id: string;
   phase: 'baixando' | 'instalando';
@@ -38,6 +48,8 @@ interface HubApi {
   reveal(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   info(): Promise<{ version: string; platform: string; arch: string }>;
+  hubUpdate(force: boolean): Promise<HubUpdate>;
+  updateHub(): Promise<{ ok: boolean; error?: string }>;
   onInstallProgress(cb: (p: Progress) => void): () => void;
 }
 
@@ -101,7 +113,19 @@ const mock: HubApi = {
     window.open(url, '_blank', 'noopener');
   },
   async info() {
-    return { version: '0.1.0', platform: 'darwin', arch: 'arm64' };
+    return { version: '0.2.0', platform: 'darwin', arch: 'arm64' };
+  },
+  async hubUpdate() {
+    // simulação: finge que existe uma versão mais nova do hub
+    return { ok: true, current: '0.2.0', latest: '0.2.1', available: true, blocker: null };
+  },
+  async updateHub() {
+    for (let k = 1; k <= 20; k++) {
+      await new Promise((r) => setTimeout(r, 50));
+      listeners.forEach((l) => l({ id: 'hub', phase: 'baixando', f: k / 20 }));
+    }
+    listeners.forEach((l) => l({ id: 'hub', phase: 'instalando', f: 1 }));
+    return { ok: true };
   },
   onInstallProgress(cb) {
     listeners.add(cb);

@@ -31,8 +31,10 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
-  # sem certificado pago da Apple: app não assinado (na 1ª vez: botão direito › Abrir)
-  identity: null
+  # sem certificado pago da Apple: assinatura local ("-"), sem notarização (na 1ª vez: botão direito › Abrir)
+  identity: "-"
+  # sem notarização: o "hardened runtime" exigiria permissões extras para abrir com assinatura local
+  hardenedRuntime: false
 dmg:
   title: Andromeda Moldes
   artifactName: Andromeda-Moldes-${version}-mac-${arch}.${ext}

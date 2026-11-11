@@ -30,7 +30,9 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
-  identity: null
+  identity: "-"
+  # sem notarização: o "hardened runtime" exigiria permissões extras para abrir com assinatura local
+  hardenedRuntime: false
 dmg:
   title: Andromeda Draw
   artifactName: Andromeda-Draw-${version}-mac-${arch}.${ext}

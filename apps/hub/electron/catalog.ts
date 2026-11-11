@@ -8,6 +8,7 @@ export const REPO = 'jwfilho1512/andromeda-moldes';
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
 
 export type AppId = 'draw' | 'moldes' | '3d';
+export type AnyId = AppId | 'hub';
 
 export interface AppDef {
   id: AppId;
@@ -27,6 +28,33 @@ export const APPS: AppDef[] = [
   { id: 'moldes', name: 'Andromeda Moldes', short: 'Moldes', desc: 'Modelagem 2D, graduação, estampa, risco e encaixe', asset: 'Andromeda-Moldes', ext: 'ctx' },
   { id: '3d', name: 'Andromeda 3D', short: '3D', desc: 'Prova virtual: avatar, costura e simulação de tecido', asset: 'Andromeda-3D', ext: 'a3d', soon: true },
 ];
+
+/** O próprio hub (não aparece como cartão; atualiza a si mesmo). */
+export const HUB: Omit<AppDef, 'id'> & { id: 'hub' } = {
+  id: 'hub',
+  name: 'Andromeda Fashion Studio',
+  short: 'Hub',
+  desc: 'Instala, atualiza e abre os apps',
+  asset: 'Andromeda-Fashion-Studio',
+  ext: '',
+};
+
+/** Onde o hub está rodando dá para trocar por uma versão nova? (não dá dentro do .dmg nem em pasta temporária do macOS) */
+export function selfUpdateBlocker(platform: string, exePath: string, packaged: boolean): string | null {
+  if (!packaged) return 'Atualização automática só no app instalado';
+  if (platform === 'darwin') {
+    if (exePath.startsWith('/Volumes/')) return 'Arraste o Andromeda Fashion Studio para Aplicativos para ele poder se atualizar';
+    if (exePath.includes('/AppTranslocation/')) return 'Mova o Andromeda Fashion Studio para Aplicativos (o macOS o abriu de um lugar temporário) para ele poder se atualizar';
+  }
+  if (platform !== 'darwin' && platform !== 'win32') return 'Sistema sem atualização automática';
+  return null;
+}
+
+/** Pasta .app que contém o executável no Mac (…/X.app/Contents/MacOS/X → …/X.app). */
+export function macBundleOf(exePath: string): string | null {
+  const i = exePath.indexOf('.app/Contents/MacOS/');
+  return i < 0 ? null : exePath.slice(0, i + 4);
+}
 
 export interface ReleaseAsset {
   name: string;
@@ -54,7 +82,7 @@ export function parseRelease(json: unknown): Release {
 }
 
 /** Instalador certo para o sistema: .dmg do Mac (chip Apple ou Intel) ou .exe do Windows. */
-export function pickAsset(assets: ReleaseAsset[], app: AppDef, platform: string, arch: string): ReleaseAsset | null {
+export function pickAsset(assets: ReleaseAsset[], app: Pick<AppDef, 'asset'>, platform: string, arch: string): ReleaseAsset | null {
   const mine = assets.filter((a) => a.name.startsWith(`${app.asset}-`));
   if (platform === 'darwin') {
     const x64 = mine.find((a) => a.name.endsWith('-mac-x64.dmg')) ?? null;

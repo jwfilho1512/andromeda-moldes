@@ -16,7 +16,7 @@ import {
 } from '@tabler/icons-react';
 import { type ComponentType, useCallback, useEffect, useState } from 'react';
 import { compareVersions, RELEASES_URL, REPO } from '../electron/catalog';
-import { type AppId, type AppStatus, type Product, type Progress, type ReleaseInfo, hub, isDesktop } from './api';
+import { type AppId, type AppStatus, type HubUpdate, type Product, type Progress, type ReleaseInfo, hub, isDesktop } from './api';
 
 type Page = 'apps' | 'produtos' | 'ajuda';
 
@@ -45,6 +45,7 @@ export function App() {
   const [progress, setProgress] = useState<Record<string, Progress | 'erro' | undefined>>({});
   const [toast, setToast] = useState<{ text: string; err?: boolean } | null>(null);
   const [info, setInfo] = useState<{ version: string } | null>(null);
+  const [self, setSelf] = useState<HubUpdate | null>(null);
 
   const say = (text: string, err = false) => {
     setToast({ text, err });
@@ -53,13 +54,22 @@ export function App() {
   };
 
   const refreshApps = useCallback(async () => setApps(await hub.apps()), []);
-  const refreshRelease = useCallback(async (force = false) => setRel(await hub.release(force)), []);
+  const refreshRelease = useCallback(async (force = false) => {
+    setRel(await hub.release(force));
+    setSelf(await hub.hubUpdate(false));
+  }, []);
 
   useEffect(() => {
     void refreshApps();
     void refreshRelease();
     void hub.info().then(setInfo);
-    return hub.onInstallProgress((p) => setProgress((s) => ({ ...s, [p.id]: p })));
+    // com o hub aberto, confere de novo a cada 30 min
+    const t = setInterval(() => void refreshRelease(), 30 * 60_000);
+    const off = hub.onInstallProgress((p) => setProgress((s) => ({ ...s, [p.id]: p })));
+    return () => {
+      clearInterval(t);
+      off();
+    };
   }, [refreshApps, refreshRelease]);
 
   const install = async (a: AppStatus) => {
@@ -69,6 +79,16 @@ export function App() {
     if (r.ok) say(`${a.name} instalado`);
     else say(r.error ?? 'Não foi possível instalar', true);
     await refreshApps();
+  };
+
+  const updateSelf = async () => {
+    setProgress((s) => ({ ...s, hub: { id: 'hub', phase: 'baixando', f: 0 } }));
+    const r = await hub.updateHub();
+    if (r.ok) say('Hub atualizado — reabrindo…');
+    else {
+      setProgress((s) => ({ ...s, hub: undefined }));
+      say(r.error ?? 'Não foi possível atualizar o hub', true);
+    }
   };
 
   const open = async (id: AppId, file?: string) => {
@@ -104,12 +124,40 @@ export function App() {
       </aside>
 
       <main className="main">
+        {self?.available && <SelfUpdateBar u={self} p={progress.hub} onUpdate={() => void updateSelf()} />}
         {page === 'apps' && <AppsPage apps={apps} rel={rel} progress={progress} onInstall={install} onOpen={(id) => void open(id)} onCheck={() => void refreshRelease(true).then(refreshApps)} />}
         {page === 'produtos' && <ProductsPage apps={apps} onOpen={open} say={say} />}
         {page === 'ajuda' && <HelpPage />}
       </main>
 
       {toast && <div className={`toast ${toast.err ? 'err' : ''}`}>{toast.text}</div>}
+    </div>
+  );
+}
+
+function SelfUpdateBar({ u, p, onUpdate }: { u: HubUpdate; p: Progress | 'erro' | undefined; onUpdate: () => void }) {
+  const busy = p && p !== 'erro';
+  return (
+    <div className="selfbar">
+      <IconDownload size={18} />
+      <div className="grow">
+        <b>Nova versão do Fashion Studio: {u.latest}</b>
+        <small>{u.blocker ?? `Você está na ${u.current}. A atualização baixa, instala e reabre o hub sozinha.`}</small>
+      </div>
+      {busy ? (
+        <div className="prog mini">
+          <div className="bar">
+            <span style={{ width: `${Math.round(p.f * 100)}%` }} className={p.phase === 'instalando' ? 'pulse' : ''} />
+          </div>
+          <small>{p.phase === 'baixando' ? `Baixando… ${Math.round(p.f * 100)}%` : 'Instalando e reabrindo…'}</small>
+        </div>
+      ) : u.blocker ? (
+        <button onClick={() => void hub.openExternal(RELEASES_URL)}>Baixar na página</button>
+      ) : (
+        <button className="primary" onClick={onUpdate}>
+          Atualizar agora
+        </button>
+      )}
     </div>
   );
 }
