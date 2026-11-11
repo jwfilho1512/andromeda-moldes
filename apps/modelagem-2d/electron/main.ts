@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 const isMac = process.platform === 'darwin';
@@ -196,6 +196,23 @@ ipcMain.handle('saveFile', async (_e, content: string, path: string | null, defa
   }
   await writeFile(target, content, 'utf8');
   return { path: target, name: basename(target) };
+});
+
+/* ---------- Minhas bases (moldes-base da pessoa/equipe, fora dos documentos) ---------- */
+const basesFile = () => join(app.getPath('userData'), 'minhas-bases.json');
+ipcMain.handle('basesLoad', async () => {
+  try {
+    return await readFile(basesFile(), 'utf8');
+  } catch {
+    return null;
+  }
+});
+ipcMain.handle('basesSave', async (_e, text: string) => {
+  await mkdir(app.getPath('userData'), { recursive: true });
+  // grava ao lado e troca, para não perder as bases se faltar luz no meio
+  await writeFile(`${basesFile()}.tmp`, text, 'utf8');
+  await rename(`${basesFile()}.tmp`, basesFile());
+  return true;
 });
 
 ipcMain.handle('exportFile', async (_e, data: Uint8Array | string, defaultName: string, filterName: string, ext: string) => {

@@ -183,7 +183,7 @@ export function selectPiece(id: string): void {
 }
 
 /** Insere todos os moldes de uma base, lado a lado, à direita do que já existe. */
-export function insertBase(base: Base): void {
+export function insertBase(base: Pick<Base, 'nome' | 'pecas'> & { tamanho?: string }): void {
   const s = editor.get();
   const existing = s.doc.pieces.map((p) => bboxOfPoints(pieceGeom(p).cut));
   const all = existing.length ? existing.reduce(unionBBox) : null;
@@ -195,8 +195,9 @@ export function insertBase(base: Base): void {
     x += bb.maxX - bb.minX + 30;
     return q;
   });
-  commit({ ...s.doc, pieces: [...s.doc.pieces, ...placed] }, { pieceId: placed[0]?.id ?? null, vertex: null, edge: null });
-  notify(`${base.nome} (${base.tamanho}) inserida: ${placed.length} moldes`);
+  // todos os moldes inseridos ficam selecionados (para mover juntos ou salvar como base)
+  commit({ ...s.doc, pieces: [...s.doc.pieces, ...placed] }, { pieceId: placed[0]?.id ?? null, vertex: null, edge: null }, placed.map((p) => p.id));
+  notify(`${base.nome}${base.tamanho ? ` (${base.tamanho})` : ''} inserida: ${placed.length} moldes`);
   requestAnimationFrame(() => canvasApi.fit());
 }
 

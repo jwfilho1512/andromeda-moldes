@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('cad', {
   platform: process.platform,
   openFile: () => ipcRenderer.invoke('openFile'),
   importFile: (filterName: string, exts: string[]) => ipcRenderer.invoke('importFile', filterName, exts),
+  basesLoad: () => ipcRenderer.invoke('basesLoad'),
+  basesSave: (text: string) => ipcRenderer.invoke('basesSave', text),
   saveFile: (content: string, path: string | null, defaultName: string) => ipcRenderer.invoke('saveFile', content, path, defaultName),
   exportFile: (data: Uint8Array | string, defaultName: string, filterName: string, ext: string) =>
     ipcRenderer.invoke('exportFile', data, defaultName, filterName, ext),

@@ -10,6 +10,8 @@ interface CadApi {
   platform: string;
   openFile(): Promise<{ path: string; name: string; content: string } | null>;
   importFile(filterName: string, exts: string[]): Promise<{ path: string; name: string; data: Uint8Array } | null>;
+  basesLoad(): Promise<string | null>;
+  basesSave(text: string): Promise<boolean>;
   saveFile(content: string, path: string | null, defaultName: string): Promise<FileRef | null>;
   exportFile(data: Uint8Array | string, defaultName: string, filterName: string, ext: string): Promise<FileRef | null>;
   confirmClose(dirty: boolean): Promise<boolean>;
@@ -77,6 +79,26 @@ export const platform = {
     if (api) return api.exportFile(data, defaultName, filterName, ext);
     download(data, defaultName, ext === 'pdf' ? 'application/pdf' : 'application/octet-stream');
     return { path: null, name: defaultName };
+  },
+
+  /** Minhas bases: arquivo na pasta do usuário (app) ou armazenamento local (navegador). */
+  async basesLoad(): Promise<string | null> {
+    if (api) return api.basesLoad();
+    try {
+      return localStorage.getItem('moldes.minhasBases');
+    } catch {
+      return null;
+    }
+  },
+
+  async basesSave(text: string): Promise<boolean> {
+    if (api) return api.basesSave(text);
+    try {
+      localStorage.setItem('moldes.minhasBases', text);
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   confirmClose(dirty: boolean) {

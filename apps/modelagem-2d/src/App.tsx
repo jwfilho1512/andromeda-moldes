@@ -9,6 +9,7 @@ import { RiscoControlBar, RiscoSetup, RiscoSummary } from './risco/RiscoPanels';
 import { MenuBar } from './menu/MenuBar';
 import { GuideOverlay } from './menu/Guide';
 import { ShortcutsDialog } from './menu/Shortcuts';
+import { loadMyBases } from './editor/mybases';
 
 export function App() {
   const s = useEditor();
@@ -20,6 +21,8 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = s.theme;
   }, [s.theme]);
+
+  useEffect(() => void loadMyBases(), []);
 
   useEffect(() => {
     const off = platform.onMenu((cmd) => void runCommand(cmd));
