@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { exportFicha, exportPng, exportSvg, newDocument, openDocument, openDocumentFile, saveDocument } from './commands';
 import { importDialog } from './importers';
+import { loadUserLib } from './userlib';
 import { platform } from './platform';
 import {
   type Tool,
@@ -21,6 +22,9 @@ import { StatusBar, TOOLS, Toolbar, TopBar } from './ui/Chrome';
 import { FichaView } from './ui/Ficha';
 import { Library } from './ui/Library';
 import { Props } from './ui/Props';
+import { GuideOverlay } from './menu/Guide';
+import { MenuBar } from './menu/MenuBar';
+import { AboutDialog, ShortcutsDialog } from './menu/Shortcuts';
 
 const isTyping = (t: EventTarget | null) => t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement;
 
@@ -71,6 +75,7 @@ export function App() {
   }, [s.dirty, s.file.name]);
 
   useEffect(() => platform.onMenu(runCommand), []);
+  useEffect(() => void loadUserLib(), []);
   useEffect(() => platform.onOpenPath((f) => void openDocumentFile(f)), []);
 
   useEffect(() => {
@@ -120,6 +125,7 @@ export function App() {
 
   return (
     <div className={`app view-${s.view}`}>
+      <MenuBar />
       <TopBar />
       {s.view === 'desenho' ? (
         <>
@@ -132,6 +138,9 @@ export function App() {
         <FichaView />
       )}
       <StatusBar />
+      <GuideOverlay />
+      <ShortcutsDialog />
+      <AboutDialog />
     </div>
   );
 }

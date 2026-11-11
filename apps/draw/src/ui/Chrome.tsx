@@ -71,10 +71,10 @@ export function TopBar() {
         </div>
       </div>
       <nav className="tabs" data-help="tabs">
-        <button className={s.view === 'desenho' ? 'on' : ''} onClick={() => editor.set({ view: 'desenho' })}>
+        <button className={s.view === 'desenho' ? 'on' : ''} data-help="tab:desenho" onClick={() => editor.set({ view: 'desenho' })}>
           Desenho
         </button>
-        <button className={s.view === 'ficha' ? 'on' : ''} onClick={() => editor.set({ view: 'ficha' })}>
+        <button className={s.view === 'ficha' ? 'on' : ''} data-help="tab:ficha" onClick={() => editor.set({ view: 'ficha' })}>
           Ficha técnica
         </button>
       </nav>
@@ -88,7 +88,7 @@ export function TopBar() {
         <button className="ghost" title="Salvar (⌘S)" onClick={() => void saveDocument()}>
           <IconDeviceFloppy size={16} /> Salvar
         </button>
-        <button className="ghost" title="Importar SVG (Illustrator, Corel, Inkscape), imagem PNG/JPG ou moldes .ctx/DXF (⌘I) — ou arraste o arquivo para a prancha" onClick={() => void importDialog()}>
+        <button className="ghost" data-help="top:import" title="Importar SVG (Illustrator, Corel, Inkscape), imagem PNG/JPG ou moldes .ctx/DXF (⌘I) — ou arraste o arquivo para a prancha" onClick={() => void importDialog()}>
           <IconFileImport size={16} /> Importar
         </button>
         <span className="sep" />
@@ -98,7 +98,7 @@ export function TopBar() {
         <button className="ghost" title="Exportar imagem PNG (200 dpi)" onClick={() => void exportPng()}>
           PNG
         </button>
-        <button className="ghost" title="Ficha técnica em PDF (⌘P)" onClick={() => void exportFicha()}>
+        <button className="ghost" title="Ficha técnica em PDF (⌘P)" data-help="top:fichapdf" onClick={() => void exportFicha()}>
           <IconPrinter size={16} /> Ficha PDF
         </button>
         <span className="sep" />

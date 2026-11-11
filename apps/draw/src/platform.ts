@@ -14,6 +14,8 @@ interface CadApi {
   exportFile(data: Uint8Array | string, defaultName: string, filterName: string, ext: string): Promise<FileRef | null>;
   printPdf(defaultName: string, landscape: boolean): Promise<FileRef | null>;
   pickLink(): Promise<{ path: string; name: string } | null>;
+  libLoad(): Promise<string | null>;
+  libSave(text: string): Promise<boolean>;
   openLinked(path: string): Promise<string | null>;
   confirmClose(dirty: boolean): Promise<boolean>;
   onMenu(cb: (cmd: string) => void): () => void;
@@ -87,6 +89,26 @@ export const platform = {
     if (api) return api.printPdf(defaultName, landscape);
     window.print();
     return null;
+  },
+
+  /** Minha biblioteca: arquivo na pasta do usuário (app) ou armazenamento local (navegador). */
+  async libLoad(): Promise<string | null> {
+    if (api) return api.libLoad();
+    try {
+      return localStorage.getItem('draw.minhaBiblioteca');
+    } catch {
+      return null;
+    }
+  },
+
+  async libSave(text: string): Promise<boolean> {
+    if (api) return api.libSave(text);
+    try {
+      localStorage.setItem('draw.minhaBiblioteca', text);
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   pickLink(): Promise<{ path: string; name: string } | null> {

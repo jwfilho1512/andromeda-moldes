@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('cad', {
     ipcRenderer.invoke('exportFile', data, defaultName, filterName, ext),
   printPdf: (defaultName: string, landscape: boolean) => ipcRenderer.invoke('printPdf', defaultName, landscape),
   pickLink: () => ipcRenderer.invoke('pickLink'),
+  libLoad: () => ipcRenderer.invoke('libLoad'),
+  libSave: (text: string) => ipcRenderer.invoke('libSave', text),
   openLinked: (path: string) => ipcRenderer.invoke('openLinked', path),
   confirmClose: (dirty: boolean) => ipcRenderer.invoke('confirmClose', dirty),
   onOpenPath: (cb: (f: { path: string; name: string; content: string }) => void) => {

@@ -1,7 +1,7 @@
 /** Estado do editor do Andromeda Draw (store simples + desfazer/refazer). */
 import { useSyncExternalStore } from 'react';
 import { emptyFicha, normalizeFicha, type Ficha } from './model/ficha';
-import { type Affine, bakeMirror, transformShape } from './model/geom';
+import { type Affine, bakeMirror, bboxOfShapes, transformShape } from './model/geom';
 import { STITCH_DEFAULT } from './model/stitch';
 import { TRIM_SIZE } from './model/trims';
 import type { Brush, DrawDoc, Fill, Layer, Shape, StitchType, Style, TrimKind } from './model/types';
@@ -356,4 +356,29 @@ export function replaceDeep(sid: string, cid: string | null | undefined, fn: (s:
   const mapList = (list: Shape[]): Shape[] =>
     list.flatMap((s) => (s.id === target ? fn(s) : s.kind === 'group' ? [{ ...s, children: mapList(s.children) }] : [s]));
   commit((d) => mapLayers(d, (l) => (l.shapes.some((s) => s.id === sid) ? { ...l, shapes: mapList(l.shapes) } : l)));
+}
+
+/** Alinha a seleção pela caixa do conjunto (ou de cada item em relação à prancha, se só houver um). */
+export function alignSelected(how: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') {
+  const s = editor.get();
+  const sel = selectedShapes(s);
+  if (!sel.length) return;
+  const all = sel.length > 1 ? bboxOfShapes(sel)! : { minX: 0, minY: 0, maxX: s.doc.artboard.w, maxY: s.doc.artboard.h };
+  const moves = new Map<string, [number, number]>();
+  for (const sh of sel) {
+    const b = bboxOfShapes([sh]);
+    if (!b) continue;
+    const dx = how === 'left' ? all.minX - b.minX : how === 'right' ? all.maxX - b.maxX : how === 'hcenter' ? (all.minX + all.maxX) / 2 - (b.minX + b.maxX) / 2 : 0;
+    const dy = how === 'top' ? all.minY - b.minY : how === 'bottom' ? all.maxY - b.maxY : how === 'vcenter' ? (all.minY + all.maxY) / 2 - (b.minY + b.maxY) / 2 : 0;
+    moves.set(sh.id, [dx, dy]);
+  }
+  commit((d) =>
+    mapLayers(d, (l) => ({
+      ...l,
+      shapes: l.shapes.map((x) => {
+        const m = moves.get(x.id);
+        return m && (m[0] || m[1]) ? transformShape(x, { a: 1, b: 0, c: 0, d: 1, e: m[0], f: m[1] }) : x;
+      }),
+    })),
+  );
 }

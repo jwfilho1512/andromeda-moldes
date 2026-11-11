@@ -193,3 +193,28 @@ describe('ferramentas de desenho', () => {
     expect(Math.max(...ys)).toBeCloseTo(2, 1);
   });
 });
+
+describe('Minha biblioteca', () => {
+  it('guarda centralizado, lê pacotes, junta sem duplicar e mantém o tamanho real em outra escala', async () => {
+    const { makeAsset, parseLibrary, mergeLibrary, assetShapes, emptyLibrary } = await import('../src/model/userlib');
+    const sq: PathShape = { kind: 'path', id: 'q', path: { ...line([100, 50], [140, 50], [140, 90], [100, 90], [100, 50]), closed: true }, style: { stroke: '#000', width: 0.3, fill: null } };
+    const a = makeAsset('  Bolso  ', 'detalhes', [sq], 5);
+    expect(a.name).toBe('Bolso');
+    const b = shapeBBox(a.shapes[0]!)!;
+    expect((b.minX + b.maxX) / 2).toBeCloseTo(0, 9);
+    expect(b.minY).toBeCloseTo(0, 9);
+    // o original não muda
+    expect(sq.path.start.x).toBe(100);
+    const pack = { ...emptyLibrary(), assets: [a, { id: 'x', name: 'ruim', cat: 'nada', shapes: [] }] };
+    const lib = parseLibrary(JSON.stringify(pack));
+    expect(lib.assets).toHaveLength(1);
+    const m1 = mergeLibrary(emptyLibrary(), lib);
+    const m2 = mergeLibrary(m1.lib, lib);
+    expect(m1.added).toBe(1);
+    expect(m2.added).toBe(0);
+    // salvo em 1:5 (40 mm no desenho = 20 cm reais) → em 1:10 entra com 20 mm
+    const at10 = shapeBBox(assetShapes(a, 10)[0]!)!;
+    expect(at10.maxX - at10.minX - 0.3).toBeCloseTo(20, 6);
+    expect(() => parseLibrary('{"format":"outra"}')).toThrow(/biblioteca/);
+  });
+});

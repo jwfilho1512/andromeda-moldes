@@ -1,5 +1,5 @@
 /** Biblioteca: peças base paramétricas, detalhes, pespontos, aviamentos, tecidos e croquis. */
-import { IconCircleDot, IconNeedleThread, IconPuzzle, IconShirt, IconTexture, IconWoman } from '@tabler/icons-react';
+import { IconBookmarks, IconCircleDot, IconDownload, IconFileImport, IconNeedleThread, IconPencil, IconPuzzle, IconShirt, IconTexture, IconWoman, IconX } from '@tabler/icons-react';
 import { type ReactNode, useMemo, useState } from 'react';
 import { type BaseDef, BASES, type Vista } from '../lib/bases';
 import { CROQUIS } from '../lib/croquis';
@@ -14,10 +14,14 @@ import type { Fill, PatternKind, Shape, StitchType, TrimKind } from '../model/ty
 import { line } from '../lib/kit';
 import { addShapes, commit, editor, mapLayers, notify, selectedShapes, setStitchType, setTool, updateShapes, useEditor } from '../state';
 import { canvasApi } from './Canvas';
+import { type LibCat, ui, useUi } from '../menu/ui';
+import { ASSET_CATS, type AssetCat, type UserAsset } from '../model/userlib';
+import { addSelectionAsset, exportLibrary, importIntoLibrary, importLibraryDialog, insertAsset, removeAsset, updateAsset, useUserLib } from '../userlib';
 
-type Cat = 'bases' | 'detalhes' | 'pespontos' | 'aviamentos' | 'tecidos' | 'croquis';
+type Cat = LibCat;
 
 const CATS: { id: Cat; label: string; icon: typeof IconShirt }[] = [
+  { id: 'minha', label: 'Minha biblioteca', icon: IconBookmarks },
   { id: 'bases', label: 'Peças base', icon: IconShirt },
   { id: 'detalhes', label: 'Detalhes', icon: IconPuzzle },
   { id: 'pespontos', label: 'Pespontos', icon: IconNeedleThread },
@@ -183,18 +187,20 @@ function FabricSample({ fill }: { fill: Extract<Fill, { kind: 'pattern' }> }) {
 
 export function Library() {
   const s = useEditor();
-  const [cat, setCat] = useState<Cat>('bases');
+  const cat = useUi().libCat;
+  const setCat = (c: Cat) => ui.set({ libCat: c });
   return (
     <aside className="library" data-help="library">
       <div className="lib-cats">
         {CATS.map((c) => (
-          <button key={c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)} title={c.label}>
+          <button key={c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)} title={c.label} data-help={`lib:${c.id}`}>
             <c.icon size={17} />
             <span>{c.label}</span>
           </button>
         ))}
       </div>
       <div className="lib-body">
+        {cat === 'minha' && <MyLibrary />}
         {cat === 'bases' && (
           <>
             <p className="hint">Peças paramétricas: escolha as opções e insira. O desenho sai simétrico e editável.</p>
@@ -350,5 +356,156 @@ function Fabrics() {
         </button>
       </div>
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Minha biblioteca                                                    */
+/* ------------------------------------------------------------------ */
+
+function MyLibrary() {
+  const { lib } = useUserLib();
+  const s = useEditor();
+  const [filter, setFilter] = useState<AssetCat | 'todas'>('todas');
+  const [name, setName] = useState('');
+  const [cat, setCat] = useState<AssetCat>('pecas');
+  const [drag, setDrag] = useState(false);
+  const hasSel = s.selection.length > 0;
+  const shown = lib.assets.filter((a) => filter === 'todas' || a.cat === filter);
+  const target: AssetCat = filter === 'todas' ? cat : filter;
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDrag(false);
+    const files = await Promise.all([...e.dataTransfer.files].map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) })));
+    if (files.length) await importIntoLibrary(files, target);
+  };
+
+  return (
+    <div
+      className={`mylib ${drag ? 'drop' : ''}`}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          setDrag(true);
+        }
+      }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={(e) => void onDrop(e)}
+    >
+      <p className="hint">Seus desenhos e os da equipe, para usar em qualquer documento. Arraste SVGs ou pacotes .adrawlib para cá.</p>
+
+      <div className="card open mylib-save" data-help="lib:salvar">
+        <b>Salvar a seleção na biblioteca</b>
+        {hasSel ? (
+          <>
+            <input value={name} placeholder="Nome (ex.: Camiseta oversized)" onChange={(e) => setName(e.target.value)} />
+            <div className="row2">
+              <select value={cat} onChange={(e) => setCat(e.target.value as AssetCat)}>
+                {ASSET_CATS.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="primary"
+                onClick={() => {
+                  void addSelectionAsset(name, cat).then(() => setName(''));
+                  setFilter(cat);
+                }}
+              >
+                Salvar
+              </button>
+            </div>
+          </>
+        ) : (
+          <small className="muted">Selecione na prancha o desenho que quer guardar (peça, gola, bolso…).</small>
+        )}
+      </div>
+
+      <div className="btnrow">
+        <button className="ghost" onClick={() => void importLibraryDialog(target)} title="SVG do Illustrator/Corel ou pacote .adrawlib de um colega">
+          <IconFileImport size={15} /> Importar
+        </button>
+        <button className="ghost" onClick={() => void exportLibrary(filter === 'todas' ? undefined : filter)} title="Gera um pacote .adrawlib para passar aos colegas">
+          <IconDownload size={15} /> Exportar pacote
+        </button>
+      </div>
+
+      <div className="chips">
+        {([{ id: 'todas', label: 'Todas' }, ...ASSET_CATS] as { id: AssetCat | 'todas'; label: string }[]).map((c) => {
+          const n = c.id === 'todas' ? lib.assets.length : lib.assets.filter((a) => a.cat === c.id).length;
+          return (
+            <button key={c.id} className={filter === c.id ? 'on' : ''} onClick={() => setFilter(c.id)}>
+              {c.label}
+              {n > 0 && <span className="n">{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {shown.length ? (
+        <Grid>
+          {shown.map((a) => (
+            <AssetTile key={a.id} a={a} />
+          ))}
+        </Grid>
+      ) : (
+        <p className="muted small empty">
+          {lib.assets.length ? 'Nada nesta categoria ainda.' : 'Sua biblioteca está vazia. Desenhe uma peça, selecione e salve aqui — ou importe SVGs prontos.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function AssetTile({ a }: { a: UserAsset }) {
+  const [edit, setEdit] = useState(false);
+  const [name, setName] = useState(a.name);
+  const shapes = useMemo(() => a.shapes, [a.shapes]);
+  return (
+    <div className="tile asset">
+      <button className="asset-main" onClick={() => insertAsset(a)} title={`Inserir "${a.name}" no desenho`}>
+        <Thumb shapes={shapes} size={52} />
+      </button>
+      {edit ? (
+        <div
+          className="asset-edit"
+          onBlur={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+            setEdit(false);
+            if (name.trim() && name !== a.name) void updateAsset(a.id, { name: name.trim() });
+          }}
+        >
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
+          <select value={a.cat} onChange={(e) => void updateAsset(a.id, { cat: e.target.value as AssetCat })} title="Categoria">
+            {ASSET_CATS.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : (
+        <span className="asset-name" onDoubleClick={() => setEdit(true)} title="Duplo clique para renomear">
+          {a.name}
+        </span>
+      )}
+      <span className="asset-tools">
+        <button className="ghost icon" title="Renomear ou mudar a categoria" onClick={() => setEdit(true)}>
+          <IconPencil size={12} />
+        </button>
+        <button
+          className="ghost icon danger"
+          title="Tirar da biblioteca"
+          onClick={() => {
+            if (window.confirm(`Tirar "${a.name}" da biblioteca? Os desenhos que já usam este asset não mudam.`)) void removeAsset(a.id);
+          }}
+        >
+          <IconX size={12} />
+        </button>
+      </span>
+    </div>
   );
 }

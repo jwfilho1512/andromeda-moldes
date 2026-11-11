@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 const isMac = process.platform === 'darwin';
@@ -199,6 +199,23 @@ ipcMain.handle('printPdf', async (_e, defaultName: string, landscape: boolean) =
   const pdf = await win!.webContents.printToPDF({ pageSize: 'A4', landscape, printBackground: true, margins: { top: 0, bottom: 0, left: 0, right: 0 } });
   await writeFile(r.filePath, pdf);
   return { path: r.filePath, name: basename(r.filePath) };
+});
+
+/* ---------- Minha biblioteca (assets da pessoa/equipe, fora dos desenhos) ---------- */
+const libFile = () => join(app.getPath('userData'), 'minha-biblioteca.adrawlib');
+ipcMain.handle('libLoad', async () => {
+  try {
+    return await readFile(libFile(), 'utf8');
+  } catch {
+    return null;
+  }
+});
+ipcMain.handle('libSave', async (_e, text: string) => {
+  await mkdir(app.getPath('userData'), { recursive: true });
+  // grava ao lado e troca, para não perder a biblioteca se faltar luz no meio
+  await writeFile(`${libFile()}.tmp`, text, 'utf8');
+  await rename(`${libFile()}.tmp`, libFile());
+  return true;
 });
 
 /** Escolhe um arquivo de moldes (.ctx) para vincular à ficha. */

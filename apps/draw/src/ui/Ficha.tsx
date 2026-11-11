@@ -209,6 +209,34 @@ function countTrims(shapes: Shape[]): Aviamento[] {
   return [...count.entries()].map(([item, qtd]) => ({ item, desc: '', cor: '', qtd, unidade: 'un' }));
 }
 
+/** Conta os aviamentos desenhados e atualiza a tabela da ficha (mantendo descrições já escritas). */
+export function pullTrimsFromDrawing() {
+  const d = editor.get().doc;
+  const f = d.ficha;
+  const found = countTrims(d.layers.filter((l) => l.id !== 'croqui').flatMap((l) => l.shapes));
+  if (!found.length) {
+    notify('Nenhum aviamento desenhado ainda', 'erro');
+    return;
+  }
+  const keep = f.aviamentos.filter((a) => !found.some((x) => x.item === a.item));
+  const merged = found.map((x) => ({ ...(f.aviamentos.find((a) => a.item === x.item) ?? x), qtd: x.qtd }));
+  setFicha({ aviamentos: [...merged, ...keep] });
+  notify(`${found.length} tipo(s) de aviamento contados no desenho`);
+}
+
+export async function linkMoldesFile() {
+  const r = await platform.pickLink();
+  if (r) setFicha({ moldes: r });
+  else if (!platform.isDesktop) notify('Vincular arquivos funciona no app instalado', 'erro');
+}
+
+export async function openLinkedMoldes() {
+  const m = editor.get().doc.ficha.moldes;
+  if (!m) return notify('Nenhum arquivo de moldes vinculado — use Ficha › Vincular arquivo de moldes', 'erro');
+  const err = await platform.openLinked(m.path);
+  if (err) notify(err, 'erro');
+}
+
 export function FichaView() {
   const s = useEditor();
   const f = s.doc.ficha;
@@ -223,26 +251,11 @@ export function FichaView() {
   }, [s.doc]);
   const totalTempo = f.sequencia.reduce((a, o) => a + (o.tempo || 0), 0);
 
-  const pullTrims = () => {
-    const found = countTrims(s.doc.layers.filter((l) => l.id !== 'croqui').flatMap((l) => l.shapes));
-    if (!found.length) {
-      notify('Nenhum aviamento desenhado ainda', 'erro');
-      return;
-    }
-    const keep = f.aviamentos.filter((a) => !found.some((x) => x.item === a.item));
-    const merged = found.map((x) => ({ ...(f.aviamentos.find((a) => a.item === x.item) ?? x), qtd: x.qtd }));
-    setFicha({ aviamentos: [...merged, ...keep] });
-    notify(`${found.length} tipo(s) de aviamento contados no desenho`);
-  };
-
-  const linkMoldes = async () => {
-    const r = await platform.pickLink();
-    if (r) setFicha({ moldes: r });
-    else if (!platform.isDesktop) notify('Vincular arquivos funciona no app instalado', 'erro');
-  };
+  const pullTrims = pullTrimsFromDrawing;
+  const linkMoldes = linkMoldesFile;
 
   return (
-    <div className="ficha-wrap">
+    <div className="ficha-wrap" data-help="ficha">
       <div className="ficha-page">
         <header className="fhead">
           <div className="fbrand">
