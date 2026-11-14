@@ -25,6 +25,7 @@ import { Props } from './ui/Props';
 import { GuideOverlay } from './menu/Guide';
 import { MenuBar } from './menu/MenuBar';
 import { AboutDialog, ShortcutsDialog } from './menu/Shortcuts';
+import { ImportSvgDialog } from './ui/ImportSvgDialog';
 
 const isTyping = (t: EventTarget | null) => t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement;
 
@@ -141,6 +142,7 @@ export function App() {
       <GuideOverlay />
       <ShortcutsDialog />
       <AboutDialog />
+      <ImportSvgDialog />
     </div>
   );
 }
