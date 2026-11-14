@@ -2,7 +2,7 @@
   "name": "@cad-textil/draw",
   "productName": "Andromeda Draw",
   "description": "Andromeda Draw — desenho de moda (croqui e desenho técnico) e ficha técnica",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "main": "dist/main.cjs",

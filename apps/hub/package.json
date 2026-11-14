@@ -2,7 +2,7 @@
   "name": "@cad-textil/hub",
   "productName": "Andromeda Fashion Studio",
   "description": "Andromeda Fashion Studio — instala, atualiza e abre o Draw, o Moldes e o 3D; organiza os produtos",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "main": "dist/main.cjs",
