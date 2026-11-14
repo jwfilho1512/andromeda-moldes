@@ -3,6 +3,8 @@ export * from './geometry.js';
 export * from './pattern.js';
 export * from './edit.js';
 export * from './modelagem.js';
+export * from './pence.js';
+export * from './margem.js';
 export * from './walk.js';
 export * from './grading.js';
 export * from './marker.js';

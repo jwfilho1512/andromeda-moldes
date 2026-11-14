@@ -22,11 +22,11 @@ import {
   IconTriangleInverted,
   IconVectorBezier2,
   IconVectorSpline,
-  IconWalk,
   IconPhoto,
   IconCrosshair,
 } from '@tabler/icons-react';
 import type { Tool } from './store';
+import { IconCavas, IconPenceInterna } from './icons';
 
 export interface ToolDef {
   id: Tool;
@@ -49,13 +49,14 @@ export const TOOLS: ToolDef[] = [
   { id: 'internal', label: 'Linha interna', key: 'I', group: 'Desenho', icon: IconLineDashed, hint: 'Com um molde selecionado, clique os pontos da linha interna · Enter conclui' },
 
   { id: 'convert', label: 'Converter ponto (canto ⇄ curva)', key: 'K', group: 'Pontos e curvas', icon: IconVectorBezier2, hint: 'Clique num ponto: canto ⇄ curva · arraste a partir do ponto para puxar alças simétricas' },
-  { id: 'addPoint', label: 'Adicionar ponto', key: '+', group: 'Pontos e curvas', icon: IconCirclePlus, hint: 'Clique sobre a borda: insere ponto no clique, a uma distância exata do canto mais próximo ou dividindo a borda em N partes (barra de controle)' },
+  { id: 'addPoint', label: 'Adicionar ponto', key: '+', group: 'Pontos e curvas', icon: IconCirclePlus, hint: 'Clique sobre a borda para inserir o ponto · botão direito na borda: digite a distância do canto (ou divida em partes) e Enter cria ali' },
   { id: 'coordPoint', label: 'Ponto por coordenada', key: 'B', group: 'Pontos e curvas', icon: IconCrosshair, hint: 'Clique no ponto de referência (canto, meio da borda, outro ponto) · digite X e Y em mm a partir dele · Enter cria o ponto interno (furo/marcação) · Esc cancela' },
   { id: 'removePoint', label: 'Remover ponto', key: '-', group: 'Pontos e curvas', icon: IconCircleMinus, hint: 'Clique num ponto para removê-lo' },
 
   { id: 'parallel', label: 'Paralelo', key: 'E', group: 'Desenho', icon: IconLineDotted, hint: 'Clique numa borda ou linha interna: cria a paralela na distância da barra de controle, do lado do mouse · Alt+clique: contorno paralelo do molde inteiro (vista, forro)' },
-  { id: 'seam', label: 'Margem de costura', key: 'S', group: 'Moldes', icon: IconBorderStyle2, hint: 'Clique numa borda para aplicar a margem (valor na barra de controle) · Alt+clique remove a margem da borda' },
-  { id: 'dart', label: 'Criar pence', key: 'D', group: 'Moldes', icon: IconTriangleInverted, hint: '1) clique na borda onde fica a boca da pence · 2) clique o ápice · largura na barra de controle' },
+  { id: 'seam', label: 'Margem de costura', key: 'S', group: 'Moldes', icon: IconBorderStyle2, hint: 'Clique numa borda para aplicar a margem (para fora ou para dentro, valor na barra) · Alt+clique tira · botão direito na borda: remover, remover mantendo o corte, aplicar no molde todo' },
+  { id: 'dart', label: 'Pence no contorno', key: 'D', group: 'Moldes', icon: IconTriangleInverted, hint: 'Clique na borda: com "ápice perpendicular" a pence sai na hora (largura e profundidade na barra); sem ele, clique depois para onde ela aponta · Abrir: gira o molde pelo pivô e acrescenta a folga · botão direito: tudo, inclusive a distância do canto' },
+  { id: 'innerDart', label: 'Pence interna', key: 'Y', group: 'Moldes', icon: IconPenceInterna, hint: 'Clique dentro do molde no meio da pence (losango) · alturas de cima e de baixo, largura, giro e marcação (linhas, furos ou os dois) na barra ou no botão direito' },
   { id: 'dartTransfer', label: 'Transferir pence', key: 'T', group: 'Moldes', icon: IconRotateClockwise2, hint: '1) clique na pence · 2) clique o novo ponto da borda — a pence gira pelo ápice' },
   { id: 'cut', label: 'Cortar molde', key: 'X', group: 'Moldes', icon: IconScissors, hint: '1) clique um ponto da borda · 2) clique outro ponto — o molde vira dois (com margem no corte)' },
   { id: 'join', label: 'Unir moldes', key: 'J', group: 'Moldes', icon: IconArrowsJoin, hint: '1) clique a borda do molde A · 2) clique a borda do molde B que costura nela' },
@@ -63,10 +64,10 @@ export const TOOLS: ToolDef[] = [
   { id: 'unfold', label: 'Desdobrar molde', key: 'U', group: 'Moldes', icon: IconFlipHorizontal, hint: 'Clique na borda reta que está na dobra (ex.: centro frente)' },
   { id: 'pleat', label: 'Prega', key: 'Q', group: 'Moldes', icon: IconLayoutDistributeVertical, hint: '1) e 2) clique as duas pontas da linha da prega · tipo (faca, macho, fêmea), sentido, leque e bico na barra de controle' },
   { id: 'spread', label: 'Abrir folga paralela', key: 'O', group: 'Moldes', icon: IconArrowsHorizontal, hint: '1) e 2) clique as pontas da linha de abertura · valor na barra de controle' },
-  { id: 'walk', label: 'Andar molde', key: 'W', group: 'Moldes', icon: IconWalk, hint: '1) clique a costura do molde A perto do início · 2) clique a costura do molde B perto do mesmo início · mova o mouse ao longo da costura · clique pausa · setas ±1 mm (Shift 10) · N = próximo pique/canto · Esc sai' },
+  { id: 'walk', label: 'Andar molde', key: 'W', group: 'Moldes', icon: IconCavas, hint: '1) clique a costura do molde A perto da ponta onde ela começa · 2) clique a costura do molde B em qualquer ponto · arraste para andar (gruda nos piques) · N = próximo pique · I inverte · Esc sai' },
   { id: 'spreadRadial', label: 'Abrir folga em leque', key: 'L', group: 'Moldes', icon: IconChartArcs, hint: '1) clique onde abre (ex.: barra) · 2) clique o pivô (ex.: cintura) · valor na barra de controle' },
 
-  { id: 'notch', label: 'Pique', key: 'N', group: 'Marcações e medidas', icon: IconSeparatorVertical, hint: 'Clique na borda: pique no clique, a uma distância exata do canto mais próximo ou dividindo a borda em N partes (barra de controle)' },
+  { id: 'notch', label: 'Pique', key: 'N', group: 'Marcações e medidas', icon: IconSeparatorVertical, hint: 'Clique na borda para marcar o pique · botão direito na borda: digite a distância do canto (ou divida em partes) e Enter marca ali' },
   { id: 'print', label: 'Estampa', key: 'A', group: 'Marcações e medidas', icon: IconPhoto, hint: 'Clique num molde sem estampa para importar a arte (localizada no ponto do clique) · arraste a arte para posicionar · tipo, arte por tamanho, largura, giro e sangria no painel Estampas' },
   { id: 'measure', label: 'Medir', key: 'M', group: 'Marcações e medidas', icon: IconRulerMeasure, hint: 'Arraste entre dois pontos para medir (atrai para os vértices) · Esc limpa' },
 ];

@@ -66,7 +66,7 @@ export function addPointAt(p: { x: number; y: number }): { piece: Piece; kind: P
 }
 
 export function setTool(tool: Tool): void {
-  editor.set({ tool });
+  editor.set({ tool, fresh: [] });
 }
 
 export function addPieceFromOutline(outline: Path, name?: string): Piece {

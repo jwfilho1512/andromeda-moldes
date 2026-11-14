@@ -19,7 +19,8 @@ import {
   signedArea,
   sub,
 } from './geometry.js';
-import { normalizeClosed } from './edit.js';
+import { normalizeClosed, vertices } from './edit.js';
+import { notchCutLine, sewLineWithDarts } from './pence.js';
 import type { Grading } from './grading.js';
 import type { PiecePrint } from './estampa-frame.js';
 import type { Artwork } from './estampa.js';
@@ -40,14 +41,24 @@ export interface Notch {
 
 /**
  * Pence: a "boca" é uma aresta do contorno (entre as duas pernas) e o ápice é um ponto interno.
- * O contorno continua fechado sobre a boca (pence marcada, como se corta na produção);
- * a pence é desenhada e plotada a partir destes dados.
+ * O contorno guardado continua fechado sobre a boca; a linha de costura e a de corte saem dele
+ * conforme o tipo (ver `pence.ts`), então mexer no ápice ou nas pernas atualiza o molde sozinho.
  */
 export interface Dart {
   /** Aresta do contorno que forma a boca da pence (vértice edge → edge+1 = pernas). */
   edge: number;
   apex: Vec2;
+  /**
+   * marcada (padrão, arquivos antigos): o contorno passa reto sobre a boca, só marca.
+   * bico: o contorno ganha o bico, para a costura ficar reta com a pence fechada.
+   * recortada: o triângulo da pence sai do molde (com margem nas pernas).
+   */
+  kind?: DartKind;
+  /** Para que lado a pence deita ao ser passada: -1 = perna do 1º vértice (edge), 1 = a outra. */
+  side?: 1 | -1;
 }
+
+export type DartKind = 'marcada' | 'bico' | 'recortada';
 
 /** Molde (peça) — a unidade básica de modelagem planificada. */
 export interface Piece {
@@ -122,12 +133,27 @@ export function newDocument(name: string): PatternDocument {
 
 /** Polilinha da linha de corte (contorno + margem de costura). */
 export function cutLine(piece: Piece, tolerance?: number): Vec2[] {
+  const darts = piece.darts ?? [];
+  const recortadas = darts.filter((d) => d.kind === 'recortada');
+  const cut = cutLineBase(piece, tolerance);
+  if (!recortadas.length) return cut;
+  const verts = vertices(piece.outline);
+  return recortadas.reduce((acc, d) => notchCutLine(acc, d, verts[d.edge]!, verts[(d.edge + 1) % verts.length]!, edgeSeam(piece, d.edge)), cut);
+}
+
+/** Linha de costura (contorno com o bico ou o recorte das pences). */
+export function sewLine(piece: Piece, tolerance?: number): Vec2[] {
+  return sewLineWithDarts(piece, tolerance).points;
+}
+
+function cutLineBase(piece: Piece, tolerance?: number): Vec2[] {
   const byEdge = piece.seamByEdge && Object.keys(piece.seamByEdge).length > 0;
-  if (!byEdge) {
+  const shaped = (piece.darts ?? []).some((d) => d.kind && d.kind !== 'marcada');
+  if (!byEdge && !shaped) {
     const base = flattenPath(piece.outline, tolerance);
     return piece.seamAllowanceMm > 0 ? offsetPolygon(base, piece.seamAllowanceMm) : base;
   }
-  const { points, edgeOf } = flattenWithEdges(piece.outline, tolerance);
+  const { points, edgeOf } = sewLineWithDarts(piece, tolerance, true);
   const ds = edgeOf.map((e) => edgeSeam(piece, e));
   if (ds.every((d) => d === 0)) return points;
   let cut = offsetPolygonVar(points, ds);

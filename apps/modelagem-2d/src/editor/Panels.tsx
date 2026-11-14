@@ -34,6 +34,9 @@ import {
   type Piece,
   bboxOfPoints,
   cutLine,
+  dartGeometry,
+  applySeam,
+  allEdges,
   unionBBox,
   edgeControls,
   edgeCount,
@@ -279,48 +282,77 @@ export function ToolPalette() {
 /* ------------------------------------------------------------------ */
 
 function WalkControls({ info }: { info: WalkInfo | null }) {
-  if (!info) return <span className="muted">Clique a costura do molde A perto do início da costura</span>;
-  const tol = 1;
-  const diff = info.cornerDiff;
-  const ok = diff !== null && Math.abs(diff) <= tol;
-  const smooth = Math.abs(180 - info.startAngleDeg) <= 3;
-  const worst = info.notchPairs.reduce((m, p) => Math.max(m, Math.abs(p.diff)), 0);
+  if (!info) return <span className="muted">1) clique a costura do molde A perto da ponta onde ela começa · 2) clique a costura do molde B em qualquer ponto</span>;
   return (
     <>
       <span className="walk-pair">
         <b>{info.aName}</b> × <b>{info.bName}</b>
-        {info.mirrored && <em> (espelhado)</em>}
       </span>
-      <span className="walk-stat">
-        Andado <b>{fmtLen(info.s)}</b> {unitLabel()}{info.frozen ? ' · pausado' : ''}
-      </span>
-      <span className={`walk-stat ${diff === null ? '' : ok ? 'good' : 'bad'}`} title="Distância até o próximo canto em cada molde">
-        Próximo canto A {info.nextCornerA !== null ? fmtLen(info.nextCornerA) : '—'} · B {info.nextCornerB !== null ? fmtLen(info.nextCornerB) : '—'} →{' '}
-        <b>{diff === null ? '—' : `${diff >= 0 ? '+' : ''}${fmtLen(diff)} ${unitLabel()}`}</b>
-      </span>
-      <span className={`walk-stat ${info.notchPairs.length ? (worst <= tol ? 'good' : 'bad') : ''}`} title="Piques de A × piques de B">
-        Piques {info.notchPairs.length ? `${info.notchPairs.length} par(es), maior desvio ${fmtLen(worst)} ${unitLabel()}` : '—'}
-      </span>
-      <span className={`walk-stat ${smooth ? 'good' : 'bad'}`} title="Ângulo na junção do início (180° = curva contínua)">
-        Junção {fmtMm(info.startAngleDeg, 1)}° {smooth ? 'contínua' : 'com bico'}
-      </span>
-      <button className="ghost" onClick={() => canvasApi.walkMarkNotch()}>Marcar pique aqui</button>
-      <button className="ghost" onClick={() => canvasApi.walkFix()}>Fixar molde aqui</button>
+      <span className="muted">arraste no desenho para andar · resultado na janela ao lado dos moldes</span>
       <button className="ghost" onClick={() => canvasApi.walkExit()}>Sair</button>
     </>
   );
 }
 
-export function ControlBar() {
+/** Ajustes da ferramenta: os mesmos na barra de controle e no menu do botão direito. */
+export function ToolOptions() {
   const s = useEditor();
   const walkInfo = useWalk();
-  const t = toolById(s.tool);
   const sel = s.doc.pieces.find((p) => p.id === s.selection.pieceId);
   const o = s.opts;
   let options: ReactNode = null;
   switch (s.tool) {
     case 'dart':
-      options = <Row label="Largura da boca"><NumberField value={o.dartWidth} min={1} digits={1} onCommit={(v) => setOpt('dartWidth', v)} width={64} /></Row>;
+      options = (
+        <>
+          <span className="seg" data-help="ctrl:dartMode" title="Marcar: a pence tira a largura da borda · Abrir: corta até o pivô e gira um lado do molde, acrescentando a folga (como no Audaces)">
+            {(['marcar', 'abrir'] as const).map((k) => (
+              <button key={k} className={o.dartMode === k ? 'on' : ''} onClick={() => setOpt('dartMode', k)}>
+                {k === 'marcar' ? 'Marcar' : 'Abrir'}
+              </button>
+            ))}
+          </span>
+          <span className="seg" data-help="ctrl:dartKind" title="Só marcar: o contorno passa reto · Com bico: o contorno ganha a pontinha para a costura fechar reta · Recortada: o triângulo sai do molde">
+            {(['marcada', 'bico', 'recortada'] as const).map((k) => (
+              <button key={k} className={o.dartKind === k ? 'on' : ''} onClick={() => setOpt('dartKind', k)}>
+                {k === 'marcada' ? 'Só marcar' : k === 'bico' ? 'Com bico' : 'Recortada'}
+              </button>
+            ))}
+          </span>
+          <Row label="Largura"><NumberField value={o.dartWidth} min={1} digits={1} onCommit={(v) => setOpt('dartWidth', v)} width={60} /></Row>
+          <Row label="Profundidade"><NumberField value={o.dartDepth} min={0} digits={1} onCommit={(v) => setOpt('dartDepth', v)} width={60} /></Row>
+          <label className="check" title="Ápice reto para dentro da borda, na profundidade digitada: um clique cria a pence. Desligado: depois do clique na borda, clique para onde ela aponta">
+            <input type="checkbox" checked={o.dartPerp} onChange={(e) => setOpt('dartPerp', e.target.checked)} /> Ápice perpendicular
+          </label>
+          <span className="seg" data-help="ctrl:dartAlign" title="Onde a boca abre em relação ao ponto clicado (olhando do ápice para a borda): o ponto vira uma das pernas e a largura vai para a esquerda ou direita, ou fica centrada nele. Em Abrir, é o lado que gira">
+            {(['esquerda', 'centro', 'direita'] as const).map((k) => (
+              <button key={k} className={o.dartAlign === k ? 'on' : ''} onClick={() => setOpt('dartAlign', k)} disabled={k === 'centro' && o.dartMode === 'abrir'}>
+                {k === 'esquerda' ? '← Esq.' : k === 'centro' ? 'Centro' : 'Dir. →'}
+              </button>
+            ))}
+          </span>
+          {o.dartKind === 'bico' && (
+            <button className="ghost" title="Para que lado a pence deita ao ser passada (muda o bico)" onClick={() => setOpt('dartSide', o.dartSide === 1 ? -1 : 1)}>
+              Bico: {o.dartSide === 1 ? '2ª perna' : '1ª perna'}
+            </button>
+          )}
+        </>
+      );
+      break;
+    case 'innerDart':
+      options = (
+        <>
+          <Row label="Cima"><NumberField value={o.innerTop} min={1} digits={1} onCommit={(v) => setOpt('innerTop', v)} width={58} /></Row>
+          <Row label="Baixo"><NumberField value={o.innerBottom} min={1} digits={1} onCommit={(v) => setOpt('innerBottom', v)} width={58} /></Row>
+          <Row label="Largura"><NumberField value={o.innerWidth} min={1} digits={1} onCommit={(v) => setOpt('innerWidth', v)} width={58} /></Row>
+          <Row label="Giro"><NumberField value={o.innerAngle} digits={1} suffix="°" onCommit={(v) => setOpt('innerAngle', v)} width={48} /></Row>
+          <select value={o.innerMarks} title="Como a pence interna fica marcada no molde" onChange={(e) => setOpt('innerMarks', e.target.value as typeof o.innerMarks)}>
+            <option value="ambos">Linhas e furos</option>
+            <option value="linhas">Só linhas</option>
+            <option value="piques">Só furos nas pontas</option>
+          </select>
+        </>
+      );
       break;
     case 'cut':
       options = <Row label="Margem na borda do corte"><NumberField value={o.cutSeam} min={0} digits={1} onCommit={(v) => setOpt('cutSeam', v)} width={64} /></Row>;
@@ -374,16 +406,21 @@ export function ControlBar() {
       options = (
         <>
           <Row label={o.seamHem ? 'Barra' : 'Margem'}><NumberField value={o.seamMm} min={0} digits={1} onCommit={(v) => setOpt('seamMm', v)} width={64} /></Row>
+          <span className="seg" role="radiogroup" title="Para fora: a linha desenhada é a costura e a margem cresce para fora · Para dentro: a linha desenhada é o corte, a costura entra">
+            <button className={o.seamDir === 'fora' ? 'on' : ''} onClick={() => setOpt('seamDir', 'fora')}>Para fora</button>
+            <button className={o.seamDir === 'dentro' ? 'on' : ''} onClick={() => setOpt('seamDir', 'dentro')}>Para dentro</button>
+          </span>
           <span className="seg" role="radiogroup" title="Barra espelhada: os cantos da margem são rebatidos sobre a linha de dobra, para a barra dobrada encaixar nas laterais (manga, calça, saia)">
             <button className={!o.seamHem ? 'on' : ''} onClick={() => setOpt('seamHem', false)}>Margem comum</button>
             <button className={o.seamHem ? 'on' : ''} onClick={() => setOpt('seamHem', true)}>Barra espelhada</button>
           </span>
           {sel && (
             <>
-              <button className="ghost" onClick={() => commitPiece(sel.id, (p) => ({ ...p, seamAllowanceMm: o.seamMm, seamByEdge: undefined }))}>Aplicar em todo o molde</button>
-              <button className="ghost" onClick={() => commitPiece(sel.id, (p) => ({ ...p, seamAllowanceMm: 0, seamByEdge: undefined }))}>Zerar margens do molde</button>
+              <button className="ghost" onClick={() => commitPiece(sel.id, (p) => ({ ...applySeam({ ...p, hemByEdge: undefined }, allEdges(p), o.seamMm, o.seamDir), seamAllowanceMm: o.seamMm, seamByEdge: undefined }))}>Aplicar em todo o molde</button>
+              <button className="ghost" onClick={() => commitPiece(sel.id, (p) => ({ ...p, seamAllowanceMm: 0, seamByEdge: undefined, hemByEdge: undefined }))}>Zerar margens</button>
             </>
           )}
+          <span className="muted">clique na borda aplica · Alt+clique tira · botão direito: mais ações</span>
         </>
       );
       break;
@@ -409,13 +446,19 @@ export function ControlBar() {
       );
       break;
   }
+  return <>{options}</>;
+}
+
+export function ControlBar() {
+  const s = useEditor();
+  const t = toolById(s.tool);
   return (
     <div className="controlbar" data-help="ctrl">
       <span className="cb-tool">
         <t.icon size={17} stroke={1.6} />
         {t.label}
       </span>
-      <div className="cb-options">{options}</div>
+      <div className="cb-options"><ToolOptions /></div>
       <div className="spacer" />
       <SnapChips />
       <label className="snap" title="Ímã da grade (G liga/desliga)">
@@ -706,6 +749,7 @@ function DocProps() {
         <li>Duplo clique no ponto: canto ⇄ curva · na borda: reta ⇄ curva</li>
         <li><kbd>Alt</kbd>+clique na borda: inserir ponto · <kbd>Alt</kbd> ao arrastar alça: independente</li>
         <li>Setas: mover 1 mm (<kbd>Shift</kbd>: 10 mm) · <kbd>G</kbd>: ímã da grade</li>
+        <li><kbd>Botão direito</kbd> no desenho: ajustes rápidos da ferramenta (distância, largura, lado…) — digite e Enter</li>
         <li>Teclas das ferramentas: veja a dica ao passar o mouse na paleta</li>
       </ul>
     </>
@@ -772,12 +816,30 @@ function PieceProps({ piece }: { piece: Piece }) {
           <button className="ghost icon xs" title="Remover ponto" onClick={() => update((p) => ({ ...p, drills: p.drills?.filter((_, k) => k !== i).length ? p.drills.filter((_, k) => k !== i) : undefined }))}><IconX size={12} /></button>
         </div>
       ))}
-      {(piece.darts ?? []).map((_, i) => (
-        <div className="row info" key={`d${i}`}>
-          <span>Pence {i + 1}</span>
-          <button className="ghost icon xs" title="Remover pence" onClick={() => update((p) => ({ ...p, darts: p.darts?.filter((__, k) => k !== i) }))}><IconX size={12} /></button>
-        </div>
-      ))}
+      {(piece.darts ?? []).map((d, i) => {
+        const g = dartGeometry(piece, d);
+        const setDart = (patch: Partial<typeof d>) => update((p) => ({ ...p, darts: p.darts?.map((x, k) => (k === i ? { ...x, ...patch } : x)) }));
+        return (
+          <div className="dart-row" key={`d${i}`}>
+            <div className="row info">
+              <span>Pence {i + 1} · {fmtLen(g.width)} × {fmtLen(g.length)} {unitLabel()}</span>
+              <button className="ghost icon xs" title="Remover pence" onClick={() => update((p) => ({ ...p, darts: p.darts?.filter((__, k) => k !== i) }))}><IconX size={12} /></button>
+            </div>
+            <div className="row">
+              <select value={d.kind ?? 'marcada'} title="Como a pence aparece no molde" onChange={(e) => setDart({ kind: e.target.value === 'marcada' ? undefined : (e.target.value as 'bico' | 'recortada') })}>
+                <option value="marcada">Só marcar</option>
+                <option value="bico">Com bico</option>
+                <option value="recortada">Recortada</option>
+              </select>
+              {d.kind === 'bico' && (
+                <button className="ghost" title="Para que lado a pence deita ao ser passada" onClick={() => setDart({ side: d.side === 1 ? -1 : 1 })}>
+                  Inverter bico
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
       {piece.internals.map((path, i) => (
         <div className="row info" key={`i${i}`}>
           <span>Linha interna {i + 1} · {fmtLen(pathLength(path))} {unitLabel()}</span>

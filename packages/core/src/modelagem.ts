@@ -73,7 +73,7 @@ interface Carry {
   /** Piques: posição (já transformada) e profundidade. */
   notches: { p: Vec2; depth: number }[];
   /** Pences: origem da boca + ápice já transformado. */
-  darts: { from: string; apex: Vec2 }[];
+  darts: { from: string; apex: Vec2; kind?: Dart['kind']; side?: Dart['side'] }[];
   internals: Path[];
   /** Pontos internos (furos) já transformados. */
   drills: Vec2[];
@@ -96,7 +96,7 @@ function collect(piece: Piece, tag: string, opts: { f?: (edge: number) => Fn | n
   }
   for (const d of piece.darts ?? []) {
     const f = fOf(d.edge);
-    if (f) c.darts.push({ from: `${tag}:${d.edge}`, apex: f(d.apex) });
+    if (f) c.darts.push({ from: `${tag}:${d.edge}`, apex: f(d.apex), ...(d.kind ? { kind: d.kind } : {}), ...(d.side ? { side: d.side } : {}) });
   }
   if (opts.internals !== null) {
     const fi = opts.internals ?? ID;
@@ -126,7 +126,7 @@ function build(base: Piece, verts: Vec2[], edges: NewEdge[], carry: Carry, over:
   const darts: Dart[] = [];
   for (const d of carry.darts) {
     const idx = edges.findIndex((e) => e.from === d.from);
-    if (idx >= 0) darts.push({ edge: idx, apex: d.apex });
+    if (idx >= 0) darts.push({ edge: idx, apex: d.apex, ...(d.kind ? { kind: d.kind } : {}), ...(d.side ? { side: d.side } : {}) });
   }
   return {
     ...base,
@@ -202,7 +202,7 @@ export function reversePiece(piece: Piece): Piece {
     ...piece,
     outline: compose({ verts, edges, closed: true }),
     notches: piece.notches.map((x) => ({ ...x, edge: n - 1 - x.edge, t: 1 - x.t })),
-    darts: piece.darts?.map((x) => ({ ...x, edge: n - 1 - x.edge })),
+    darts: piece.darts?.map((x) => ({ ...x, edge: n - 1 - x.edge, side: (x.side === 1 ? -1 : 1) as 1 | -1 })),
     seamByEdge: piece.seamByEdge ? seamByEdge : undefined,
     hemByEdge: piece.hemByEdge ? hemByEdge : undefined,
   };
@@ -245,20 +245,180 @@ function lengthAtParam(path: Path, edge: number, t: number): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * Cria uma pence com boca centrada no ponto clicado da borda, largura `widthMm`, e ápice em `apex`.
+ * Onde fica a boca em relação ao ponto clicado: centrada nele, ou com o ponto clicado como uma
+ * das pernas e a abertura medida dali para trás ('inicio', sentido do começo da aresta) ou para
+ * frente ('fim').
  */
-export function createDart(piece: Piece, at: EdgeHit, apex: Vec2, widthMm: number): Piece {
+export type DartAlign = 'centro' | 'inicio' | 'fim';
+
+function mouthParams(piece: Piece, at: EdgeHit, widthMm: number, align: DartAlign): { t1: number; t2: number } {
   if (widthMm <= 0) throw new Error('A largura da pence deve ser maior que zero');
   const s0 = lengthAtParam(piece.outline, at.edge, at.t);
   const { total } = paramAtLength(piece.outline, at.edge, 0);
-  if (s0 - widthMm / 2 < 0.5 || s0 + widthMm / 2 > total - 0.5) throw new Error('A boca da pence ultrapassa a borda — afaste do canto ou diminua a largura');
-  const t1 = paramAtLength(piece.outline, at.edge, s0 - widthMm / 2).t;
-  const t2 = paramAtLength(piece.outline, at.edge, s0 + widthMm / 2).t;
+  const a = align === 'centro' ? s0 - widthMm / 2 : align === 'inicio' ? s0 - widthMm : s0;
+  const b = a + widthMm;
+  if (a < 0.5 || b > total - 0.5) throw new Error('A boca da pence ultrapassa a borda — afaste do canto, diminua a largura ou abra para o outro lado');
+  return { t1: paramAtLength(piece.outline, at.edge, a).t, t2: paramAtLength(piece.outline, at.edge, b).t };
+}
+
+/** Pernas da boca da pence (para pré-visualizar antes de criar). */
+export function dartMouth(piece: Piece, at: EdgeHit, widthMm: number, align: DartAlign = 'centro'): { legA: Vec2; legB: Vec2 } {
+  const { t1, t2 } = mouthParams(piece, at, widthMm, align);
+  return { legA: pointOnEdge(piece.outline, at.edge, t1), legB: pointOnEdge(piece.outline, at.edge, t2) };
+}
+
+/**
+ * Cria uma pence com boca de largura `widthMm` no ponto clicado da borda (centrada nele, ou
+ * aberta para um lado — `style.align`) e ápice em `apex`.
+ */
+export function createDart(piece: Piece, at: EdgeHit, apex: Vec2, widthMm: number, style: { kind?: Dart['kind']; side?: Dart['side']; align?: DartAlign } = {}): Piece {
+  const { t1, t2 } = mouthParams(piece, at, widthMm, style.align ?? 'centro');
   const { piece: p, indices } = insertPoints(piece, [{ edge: at.edge, t: t1 }, { edge: at.edge, t: t2 }]);
   const [i1, i2] = indices as [number, number];
   const n = vertices(p.outline).length;
   const mouth = (i1 + 1) % n === i2 ? i1 : i2;
-  return { ...p, darts: [...(p.darts ?? []), { edge: mouth, apex }] };
+  const dart: Dart = { edge: mouth, apex };
+  if (style.kind && style.kind !== 'marcada') dart.kind = style.kind;
+  if (style.side) dart.side = style.side;
+  return { ...p, darts: [...(p.darts ?? []), dart] };
+}
+
+/**
+ * Ápice da pence a `depthMm` da boca: reto para dentro do molde (perpendicular à boca) ou,
+ * com `toward`, na direção desse ponto (se `depthMm` for 0, o próprio ponto).
+ */
+export function dartApexAt(piece: Piece, at: EdgeHit, widthMm: number, align: DartAlign, depthMm: number, toward?: Vec2): Vec2 {
+  const { legA, legB } = dartMouth(piece, at, widthMm, align);
+  const mid = lerp(legA, legB, 0.5);
+  if (toward) {
+    if (!(depthMm > 0)) return toward;
+    return add(mid, scale(normalize(sub(toward, mid)), depthMm));
+  }
+  if (!(depthMm > 0)) throw new Error('Informe a profundidade da pence');
+  let nrm = normalize({ x: -(legB.y - legA.y), y: legB.x - legA.x });
+  if (!pointInPolygon(add(mid, scale(nrm, 0.5)), flattenPath(piece.outline))) nrm = scale(nrm, -1);
+  return add(mid, scale(nrm, depthMm));
+}
+
+/**
+ * ABRIR PENCE (como no Audaces): corta do ponto da borda até o pivô e gira um dos lados do
+ * molde em volta do pivô até abrir `widthMm` na borda — a pence ACRESCENTA folga em vez de
+ * tirar da borda. `side` = lado que gira ('fim' = sentido da aresta, 'inicio' = o contrário).
+ * Onde a linha do corte sai do outro lado do molde fica uma quebra; se as duas bordas ali forem
+ * retas ela é acertada sozinha (as retas se encontram).
+ */
+export function openDart(piece: Piece, at: EdgeHit, pivot: Vec2, widthMm: number, side: 'inicio' | 'fim', style: { kind?: Dart['kind']; side?: Dart['side'] } = {}): Piece {
+  if (!(widthMm > 0)) throw new Error('A abertura da pence deve ser maior que zero');
+  const P0 = pointOnEdge(piece.outline, at.edge, at.t);
+  const rP = dist(P0, pivot);
+  if (rP < 1) throw new Error('O pivô precisa ficar longe da borda');
+  if (widthMm >= 2 * rP) throw new Error('Abertura grande demais para essa profundidade');
+  // onde a reta borda → pivô sai do outro lado do molde
+  const dir = normalize(sub(pivot, P0));
+  const poly = flattenPath(piece.outline);
+  let xPt: Vec2 | null = null, best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!, b = poly[(i + 1) % poly.length]!;
+    const e = sub(b, a);
+    const den = cross(dir, e);
+    if (Math.abs(den) < 1e-12) continue;
+    const w = sub(a, pivot);
+    const t = cross(w, e) / den;
+    const u = cross(w, dir) / den;
+    if (t > 1e-6 && u >= 0 && u <= 1 && t < best) [best, xPt] = [t, add(pivot, scale(dir, t))];
+  }
+  if (!xPt || !pointInPolygon(pivot, poly)) throw new Error('O pivô precisa ficar dentro do molde');
+  const xh = closestOnPath(piece.outline, xPt);
+  const { piece: p, indices } = insertPoints(piece, [at, { edge: xh.edge, t: xh.t }]);
+  const [kP, kX] = indices as [number, number];
+  if (kP === kX) throw new Error('Não deu para abrir a pence nesse ponto');
+  const d = decompose(p.outline);
+  const n = d.verts.length;
+  const P = d.verts[kP]!;
+  const forward = side === 'fim';
+  // lado que gira: ponto dele perto de P, para saber o sentido do giro (abrir, não fechar)
+  const Q = forward ? pointOnEdge(p.outline, kP, 0.05) : pointOnEdge(p.outline, (kP - 1 + n) % n, 0.95);
+  const th = 2 * Math.asin(widthMm / (2 * rP));
+  const rPlus = rotateAbout(pivot, th);
+  const sgn = (v: Vec2) => Math.sign(cross(sub(pivot, P), sub(v, P)));
+  const rot = sgn(rPlus(P)) === sgn(Q) ? rPlus : rotateAbout(pivot, -th);
+
+  const moving = forward ? chain(d, p, 'A', kP, kX, rot) : chain(d, p, 'A', kX, kP, rot);
+  const fixed = forward ? chain(d, p, 'A', kX, kP) : chain(d, p, 'A', kP, kX);
+  const line = (): EdgeData => ({ kind: 'line' });
+  const mouth: NewEdge = { data: line(), ...seamOf(p, kP), from: 'nova-pence' };
+  const brk: NewEdge = { data: line(), ...seamOf(p, kX), from: 'quebra' };
+  let verts: Vec2[], edges: NewEdge[], b: number;
+  if (forward) {
+    // P' … X' | X … P | boca P → P'
+    verts = [...moving.verts, ...fixed.verts];
+    edges = [...moving.edges, brk, ...fixed.edges, mouth];
+    b = moving.verts.length - 1;
+  } else {
+    // P … X | X' … P' | boca P' → P
+    verts = [...fixed.verts, ...moving.verts];
+    edges = [...fixed.edges, brk, ...moving.edges, mouth];
+    b = fixed.verts.length - 1;
+  }
+  // a boca é a última aresta (fecha do último vértice para o primeiro)
+  // acerta a quebra quando as duas bordas vizinhas são retas
+  const eb = edges[b - 1], ea = edges[b + 1];
+  if (eb && ea && eb.data.kind === 'line' && ea.data.kind === 'line' && b >= 1 && b + 2 < verts.length) {
+    const a0 = verts[b - 1]!, a1 = verts[b]!, c0 = verts[b + 1]!, c1 = verts[b + 2]!;
+    const r = sub(a1, a0), sv = sub(c1, c0);
+    const den = cross(r, sv);
+    const gap = dist(a1, c0);
+    if (gap < 1e-6) {
+      verts.splice(b + 1, 1);
+      edges.splice(b, 1);
+    } else if (Math.abs(den) > 1e-12) {
+      const I = add(a0, scale(r, cross(sub(c0, a0), sv) / den));
+      if (dist(I, a1) < 5 * gap + 2) {
+        verts[b] = I;
+        verts.splice(b + 1, 1);
+        edges.splice(b, 1);
+      }
+    }
+  }
+  const movingSet = forward ? edgesInChain(n, kP, kX) : edgesInChain(n, kX, kP);
+  const movingPoly = [...(forward ? chain(d, p, 'A', kP, kX) : chain(d, p, 'A', kX, kP)).verts, pivot];
+  const carry = collect(p, 'A', { f: (e) => (movingSet.has(e) ? rot : ID), internals: null });
+  carry.internals = p.internals.map((path) => (pointInPolygon(flattenPath(path)[0]!, movingPoly) ? mapPath(path, rot) : path));
+  carry.drills = (p.drills ?? []).map((q) => (pointInPolygon(q, movingPoly) ? rot(q) : q));
+  carry.darts.push({ from: 'nova-pence', apex: pivot, ...(style.kind && style.kind !== 'marcada' ? { kind: style.kind } : {}), ...(style.side ? { side: style.side } : {}) });
+  return build(p, verts, edges, carry);
+}
+
+export interface InnerDartOpts {
+  /** Altura do triângulo de cima e do de baixo, a partir do meio (mm). */
+  topMm: number;
+  bottomMm: number;
+  /** Largura no meio (mm). */
+  widthMm: number;
+  /** Giro em graus (0 = em pé). */
+  angleDeg?: number;
+  /** Como marcar: linhas do losango, piques (furos nas pontas) ou os dois. */
+  marks?: 'linhas' | 'piques' | 'ambos';
+}
+
+/** Pontos do losango da pence interna (cima, direita, baixo, esquerda). */
+export function innerDartPoints(center: Vec2, o: InnerDartOpts): [Vec2, Vec2, Vec2, Vec2] {
+  const a = ((o.angleDeg ?? 0) * Math.PI) / 180;
+  const up = { x: -Math.sin(a), y: Math.cos(a) };
+  const right = { x: Math.cos(a), y: Math.sin(a) };
+  return [add(center, scale(up, o.topMm)), add(center, scale(right, o.widthMm / 2)), sub(center, scale(up, o.bottomMm)), sub(center, scale(right, o.widthMm / 2))];
+}
+
+/** PENCE INTERNA (losango, ex.: cintura de vestido): marca no molde com linhas e/ou furos. */
+export function addInnerDart(piece: Piece, center: Vec2, o: InnerDartOpts): Piece {
+  if (!(o.topMm > 0) || !(o.bottomMm > 0) || !(o.widthMm > 0)) throw new Error('Altura de cima, de baixo e largura precisam ser maiores que zero');
+  const pts = innerDartPoints(center, o);
+  const poly = flattenPath(piece.outline);
+  if (!pts.every((q) => pointInPolygon(q, poly))) throw new Error('A pence interna passa da borda do molde');
+  const marks = o.marks ?? 'linhas';
+  const internals = marks === 'piques' ? piece.internals : [...piece.internals, { start: pts[0], segments: [pts[1], pts[2], pts[3]].map((to) => ({ kind: 'line' as const, to })), closed: true }];
+  const drills = marks === 'linhas' ? piece.drills : [...(piece.drills ?? []), ...pts];
+  return { ...piece, internals, drills };
 }
 
 /** Pernas e ângulo de uma pence. */
@@ -310,7 +470,7 @@ export function transferDart(piece: Piece, dartIndex: number, target: EdgeHit): 
   }
   const others = { ...p, darts: p.darts!.filter((_, i) => i !== dartIndex) };
   const carry = collect(others, 'A', { f: (edge) => (edge === e ? null : rotated.has(edge) ? rot : ID) });
-  carry.darts.push({ from: 'nova-pence', apex: A });
+  carry.darts.push({ from: 'nova-pence', apex: A, ...(dart.kind ? { kind: dart.kind } : {}), ...(dart.side ? { side: dart.side } : {}) });
   return build(p, verts, edges, carry);
 }
 

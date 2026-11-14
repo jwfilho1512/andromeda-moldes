@@ -2,6 +2,7 @@ import {
   type Piece,
   type Vec2,
   cutLine,
+  sewLine,
   edgeControls,
   edgeCount,
   flattenPath,
@@ -56,7 +57,12 @@ const geomCache = new WeakMap<Piece, PieceGeom>();
 export function pieceGeom(p: Piece): PieceGeom {
   let g = geomCache.get(p);
   if (!g) {
-    const sew = flattenPath(p.outline);
+    let sew = flattenPath(p.outline);
+    try {
+      sew = sewLine(p);
+    } catch {
+      /* idem */
+    }
     let cut = sew;
     try {
       cut = cutLine(p);
@@ -84,6 +90,10 @@ export function pointInPolygon(p: Vec2, poly: Vec2[]): boolean {
 
 export interface Overlay {
   penPoints: Vec2[];
+  /** Pence em andamento: pernas da boca (para o lado escolhido) para pré-visualizar. */
+  dartLegs?: { legA: Vec2; legB: Vec2 } | null;
+  /** Pence que um clique criaria (ápice perpendicular): pernas e ápice. */
+  dartGhost?: Vec2[] | null;
   /** Pontos de canto (ferramenta Curvatura). */
   penCorners: boolean[];
   penMode: 'pen' | 'curve' | 'internal';
@@ -342,7 +352,8 @@ function drawPiece(ctx: CanvasRenderingContext2D, v: View, p: Piece, selected: b
     ctx.stroke();
   }
   // pontos internos (furo/marcação): círculo de 2 mm com cruz (mínimo legível na tela)
-  for (const q of p.drills ?? []) drillMark(ctx, toScreen(v, q), Math.max(3, 2 * v.z));
+  ctx.lineWidth = 1.6;
+  for (const q of p.drills ?? []) drillMark(ctx, toScreen(v, q), Math.max(4.5, 2 * v.z));
 
   if (p.grainline) {
     const a = toScreen(v, p.grainline[0]);
@@ -381,12 +392,14 @@ function drawPiece(ctx: CanvasRenderingContext2D, v: View, p: Piece, selected: b
     ctx.lineTo(ap.x, ap.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    if (!d.kind || d.kind === 'marcada') {
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     ctx.beginPath();
     ctx.arc(ap.x, ap.y, 3, 0, Math.PI * 2);
     ctx.stroke();
@@ -445,6 +458,22 @@ function drawSelectionDetails(ctx: CanvasRenderingContext2D, v: View, p: Piece, 
   // Vértices: quadrado = canto, círculo = ponto de curva (como no Illustrator)
   verts.forEach((q, i) => vertexMarker(ctx, toScreen(v, q), isSmoothVertex(p.outline, i), s.selection.vertex === i));
 
+  // Ápices das pences (arrastáveis: o contorno acompanha)
+  for (const d of p.darts ?? []) {
+    const sp = toScreen(v, d.apex);
+    ctx.beginPath();
+    ctx.moveTo(sp.x, sp.y - 6);
+    ctx.lineTo(sp.x + 6, sp.y);
+    ctx.lineTo(sp.x, sp.y + 6);
+    ctx.lineTo(sp.x - 6, sp.y);
+    ctx.closePath();
+    ctx.fillStyle = C.marker;
+    ctx.fill();
+    ctx.strokeStyle = C.dart;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   // Pontas do fio (arrastáveis)
   if (p.grainline) {
     for (const q of p.grainline) {
@@ -457,8 +486,8 @@ function drawSelectionDetails(ctx: CanvasRenderingContext2D, v: View, p: Piece, 
   }
 }
 
-function vertexMarker(ctx: CanvasRenderingContext2D, sp: Vec2, smooth: boolean, selected: boolean, color = C.sel) {
-  const r = selected ? 5 : 4;
+function vertexMarker(ctx: CanvasRenderingContext2D, sp: Vec2, smooth: boolean, selected: boolean, color = C.sel, size = 5) {
+  const r = selected ? size + 1.5 : size;
   ctx.fillStyle = selected ? color : C.marker;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
@@ -520,6 +549,22 @@ function drawWalk(ctx: CanvasRenderingContext2D, v: View, w: NonNullable<Overlay
   ctx.textAlign = 'center';
   ctx.fillText(p.name, lc.x, lc.y);
   ctx.textAlign = 'start';
+}
+
+/** Ponto recém-criado: bolinha cheia com anel, para achar na hora. */
+function freshMarker(ctx: CanvasRenderingContext2D, sp: Vec2) {
+  ctx.save();
+  ctx.fillStyle = C.tool;
+  ctx.strokeStyle = C.tool;
+  ctx.beginPath();
+  ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  ctx.arc(sp.x, sp.y, 11, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drillMark(ctx: CanvasRenderingContext2D, s: Vec2, r: number) {
@@ -651,11 +696,17 @@ function drawOverlay(ctx: CanvasRenderingContext2D, v: View, o: Overlay) {
       // Pré-visualização da pence: boca na borda, ápice no cursor
       const m = o.pick.points[0]!;
       const ax = o.cursor;
-      const dx = ax.x - m.x, dy = ax.y - m.y;
-      const L = Math.hypot(dx, dy) || 1;
-      const px = (-dy / L) * (o.pick.dartWidth / 2), py = (dx / L) * (o.pick.dartWidth / 2);
-      polyPath(ctx, v, [{ x: m.x + px, y: m.y + py }, ax, { x: m.x - px, y: m.y - py }], false);
-      ctx.stroke();
+      const L = Math.hypot(ax.x - m.x, ax.y - m.y) || 1;
+      if (o.dartLegs) {
+        polyPath(ctx, v, [o.dartLegs.legA, ax, o.dartLegs.legB], false);
+        ctx.stroke();
+      } else {
+        // boca não cabe na borda para esse lado: só a linha até o ápice, tracejada
+        ctx.setLineDash([4, 4]);
+        polyPath(ctx, v, [m, ax], false);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       tag(ctx, `pence ${fmtLen(o.pick.dartWidth)} × ${fmtLen(L)} ${unitLabel()}`, { x: toScreen(v, ax).x + 14, y: toScreen(v, ax).y + 10 });
     } else if (o.pick.kind === 'line' || o.pick.kind === 'fold-side') {
       ctx.setLineDash([6, 4]);
@@ -862,7 +913,7 @@ function drawGroupBox(ctx: CanvasRenderingContext2D, v: View, pieces: Piece[]) {
   tag(ctx, `${pieces.length} moldes · ${fmtLen(b.maxX - b.minX)} × ${fmtLen(b.maxY - b.minY)} ${unitLabel()}`, { x: a.x - 6, y: a.y - 22 });
 }
 
-const VERTEX_TOOLS = new Set(['convert', 'removePoint']);
+const VERTEX_TOOLS = new Set(['convert', 'removePoint', 'addPoint', 'coordPoint', 'notch', 'dart', 'cut', 'fold', 'pleat', 'spread', 'spreadRadial', 'dartTransfer']);
 
 export function render(ctx: CanvasRenderingContext2D, v: View, s: EditorState, o: Overlay) {
   ctx.fillStyle = C.paper;
@@ -883,11 +934,25 @@ export function render(ctx: CanvasRenderingContext2D, v: View, s: EditorState, o
     const hp = visible.find((p) => p.id === o.hoverEdge!.pieceId);
     if (hp) edgeStroke(ctx, v, hp, o.hoverEdge.edge, C.tool, 3);
   }
-  if (VERTEX_TOOLS.has(s.tool)) {
-    for (const p of visible) {
-      if (s.locked[p.id]) continue;
-      vertices(p.outline).forEach((q, i) => vertexMarker(ctx, toScreen(v, q), isSmoothVertex(p.outline, i), false, C.tool));
-    }
+  // Pontos do contorno sempre à mostra (maiores nas ferramentas de ponto); o do molde
+  // selecionado na Seleção já vem desenhado com as alças.
+  const pointTool = VERTEX_TOOLS.has(s.tool);
+  for (const p of visible) {
+    if (s.locked[p.id] || (p === sel && s.tool === 'select' && !many)) continue;
+    const color = pointTool ? C.tool : selSet.has(p.id) ? C.sel : C.sew;
+    vertices(p.outline).forEach((q, i) => vertexMarker(ctx, toScreen(v, q), isSmoothVertex(p.outline, i), false, color, pointTool ? 5 : 3.5));
+  }
+  for (const q of s.fresh) freshMarker(ctx, toScreen(v, q));
+  if (o.dartGhost && s.tool === 'dart') {
+    ctx.save();
+    ctx.strokeStyle = C.tool;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 3]);
+    polyPath(ctx, v, o.dartGhost, false);
+    ctx.stroke();
+    ctx.restore();
+    const ap = toScreen(v, o.dartGhost[1]!);
+    tag(ctx, `pence ${fmtLen(dist(o.dartGhost[0]!, o.dartGhost[2]!))} × ${fmtLen(dist(o.dartGhost[1]!, { x: (o.dartGhost[0]!.x + o.dartGhost[2]!.x) / 2, y: (o.dartGhost[0]!.y + o.dartGhost[2]!.y) / 2 }))} ${unitLabel()}`, { x: ap.x + 12, y: ap.y + 8 });
   }
   if (o.walk) drawWalk(ctx, v, o.walk);
   if (o.coord) drawCoordPick(ctx, v, o.coord);

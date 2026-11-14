@@ -8,6 +8,16 @@ import {
   closestOnPath,
   convertVertex,
   createDart,
+  dartMouth,
+  dartApexAt,
+  openDart,
+  addInnerDart,
+  applySeam,
+  removeSeam,
+  allEdges,
+  innerDartPoints,
+  tangentOnEdge,
+  type DartAlign,
   cutPiece,
   dartGeometry,
   dist,
@@ -40,6 +50,7 @@ import {
   walkPath,
   walkReport,
   walkTransform,
+  pieceCenter,
   edgeLength,
   notchAtDistance,
   notchesDividing,
@@ -72,6 +83,11 @@ import { addPrint, importArtwork } from '../estampa/actions';
 import { type HandleId, frameCenter, frameHandles, resizeCursor, rotateFrame, scaleFrame } from '../estampa/handles';
 import { platform } from '../platform';
 import { CoordPopup } from './CoordPopup';
+import { QuickMenu, closeQuick, quickStore } from './QuickMenu';
+import { WalkPanel } from './WalkPanel';
+
+/** Ações do menu da margem de costura. */
+export type SeamAction = 'borda' | 'remover' | 'removerCorte' | 'todo' | 'zerar' | 'zerarCorte';
 
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; cx: number; cy: number }
@@ -79,6 +95,7 @@ type Drag =
   | { kind: 'vertex'; id: string; index: number; base: PatternDocument; orig: Piece }
   | { kind: 'handle'; id: string; edge: number; which: 'c1' | 'c2'; base: PatternDocument; orig: Piece }
   | { kind: 'grain'; id: string; end: 0 | 1; base: PatternDocument; orig: Piece }
+  | { kind: 'dartApex'; id: string; index: number; base: PatternDocument; orig: Piece }
   | { kind: 'convert'; id: string; index: number; base: PatternDocument; orig: Piece; start: Vec2; moved: boolean }
   | { kind: 'rect'; a: Vec2 }
   | { kind: 'measure'; a: Vec2 }
@@ -116,10 +133,19 @@ export const canvasApi = {
   walkMarkNotch: () => {},
   walkFix: () => {},
   walkExit: () => {},
+  walkInvert: () => {},
+  walkTo: (_s: number) => {},
+  walkNext: (_dir: 1 | -1) => {},
   /** Converte mm do molde para pixel da página (testes automatizados). */
   toPage: (_p: Vec2): Vec2 => ({ x: 0, y: 0 }),
   /** Converte mm do molde para pixel dentro da área do desenho (janelas flutuantes). */
   toLocal: (_p: Vec2): Vec2 => ({ x: 0, y: 0 }),
+  /** Devolve o foco ao desenho (depois de digitar na janelinha do mouse). */
+  focus: () => {},
+  /** Aplica a ferramenta no ponto clicado com o direito (Enter nos ajustes rápidos). */
+  /** Margem de costura: ação na borda clicada com o direito (ou no molde dela). */
+  seamAction: (_w: Vec2, _a: SeamAction) => {},
+  applyAt: (_w: Vec2, _mode?: 'clique' | 'distancia' | 'dividir', _distMm?: number) => {},
   /** Tamanho da área do desenho (px). */
   viewSize: (): { w: number; h: number } => ({ w: 0, h: 0 }),
 };
@@ -210,6 +236,146 @@ export function Canvas() {
     };
     canvasApi.center = () => ({ x: view.cx, y: view.cy });
     canvasApi.toLocal = (p: Vec2) => toScreen(view, p);
+    canvasApi.focus = () => canvas.focus();
+    canvasApi.applyAt = (w, mode, distMm) => {
+      const tool = editor.get().tool;
+      if (tool === 'dart') {
+        let h = pickOnOutline(w);
+        if (!h) return;
+        if (distMm && distMm > 0 && h.t > 0) {
+          // posição pelo perímetro: a tantos mm do canto mais perto, na mesma borda
+          const L = edgeLength(h.piece.outline, h.edge);
+          if (distMm >= L) return notify(`A borda tem ${fmtLenU(L)} — a distância precisa ser menor`, 'error');
+          const t = paramAtDistance(h.piece.outline, h.edge, h.t > 0.5 ? L - distMm : distMm);
+          h = { ...h, t, point: pointOnEdge(h.piece.outline, h.edge, t) };
+        }
+        if (opts().dartPerp) makeDart(h, null);
+        else {
+          pick = { tool, pieceId: h.piece.id, hits: [h] };
+          select({ pieceId: h.piece.id });
+          notify(opts().dartMode === 'abrir' ? 'Agora clique o pivô (para onde a pence aponta)' : 'Agora clique para onde a pence aponta');
+        }
+        syncPickOverlay();
+        invalidate();
+        return;
+      }
+      if (tool !== 'addPoint' && tool !== 'notch' && tool !== 'innerDart') return;
+      const prev = editor.get().opts.measureMode;
+      if (mode && mode !== prev) editor.set((st) => ({ opts: { ...st.opts, measureMode: mode } }));
+      try {
+        toolClick(tool, w);
+      } finally {
+        if (mode && mode !== prev) editor.set((st) => ({ opts: { ...st.opts, measureMode: prev } }));
+      }
+      syncPickOverlay();
+      invalidate();
+    };
+    /** Ações da margem de costura numa borda (ou no molde todo). */
+    const seamDo = (h: OutlineHit, action: SeamAction) => {
+      const o = opts();
+      const mm = o.seamMm;
+      const pc = editor.get().doc.pieces.find((p) => p.id === h.piece.id);
+      if (!pc) return;
+      const hem = o.seamHem && mm > 0;
+      const dentro = o.seamDir === 'dentro';
+      const sel = { pieceId: pc.id, edge: h.edge, vertex: null };
+      try {
+        switch (action) {
+          case 'borda':
+            commitPiece(pc.id, (p) => withHem(applySeam(p, [h.edge], mm, o.seamDir), h.edge, hem), sel);
+            notify(hem ? `Barra de ${fmtLenU(mm)} com cantos espelhados na borda ${h.edge + 1}` : `Margem de ${fmtLenU(mm)} ${dentro ? 'para dentro' : 'para fora'} na borda ${h.edge + 1}`);
+            break;
+          case 'remover':
+            commitPiece(pc.id, (p) => removeSeam(p, [h.edge], false), sel);
+            notify(`Borda ${h.edge + 1} sem margem`);
+            break;
+          case 'removerCorte':
+            commitPiece(pc.id, (p) => removeSeam(p, [h.edge], true), sel);
+            notify(`Borda ${h.edge + 1} sem margem — o contorno foi para a linha de corte`);
+            break;
+          case 'todo':
+            commitPiece(pc.id, (p) => ({ ...applySeam({ ...p, hemByEdge: undefined }, allEdges(p), mm, o.seamDir), seamAllowanceMm: mm, seamByEdge: undefined }), sel);
+            notify(`Margem de ${fmtLenU(mm)} ${dentro ? 'para dentro' : 'para fora'} em todo o molde`);
+            break;
+          case 'zerar':
+            commitPiece(pc.id, (p) => ({ ...p, seamAllowanceMm: 0, seamByEdge: undefined, hemByEdge: undefined }), sel);
+            notify('Molde sem margens');
+            break;
+          case 'zerarCorte':
+            commitPiece(pc.id, (p) => ({ ...removeSeam(p, allEdges(p), true), seamAllowanceMm: 0, seamByEdge: undefined }), sel);
+            notify('Molde sem margens — o contorno foi para a linha de corte');
+            break;
+        }
+      } catch (err) {
+        fail(err);
+      }
+      invalidate();
+    };
+    canvasApi.seamAction = (w, action) => {
+      const h = hitOutline(w, undefined, 3);
+      if (!h) return notify('Clique com o direito sobre uma borda do molde', 'error');
+      seamDo(h, action);
+    };
+    /** Esquerda/direita da pence (olhando do ápice para a borda, na tela) → sentido na aresta. */
+    const dartAlignFor = (h: OutlineHit, apex: Vec2): DartAlign => {
+      const a = opts().dartAlign;
+      if (a === 'centro') return 'centro';
+      const tan = tangentOnEdge(h.piece.outline, h.edge, h.t);
+      const P = toScreen(view, h.point), T = toScreen(view, { x: h.point.x + tan.x, y: h.point.y + tan.y }), A = toScreen(view, apex);
+      const tx = T.x - P.x, ty = T.y - P.y;
+      const dx = P.x - A.x, dy = P.y - A.y;
+      // à esquerda de quem olha na direção (dx, dy), com o y da tela para baixo
+      const forwardIsLeft = tx * dy + ty * -dx > 0;
+      return (a === 'esquerda') === forwardIsLeft ? 'fim' : 'inicio';
+    };
+    /** Boca e ápice que a pence teria (para pré-visualizar); null se não couber. */
+    const dartPreview = (h: OutlineHit, toward: Vec2 | null): { legA: Vec2; legB: Vec2; apex: Vec2 } | null => {
+      const o = opts();
+      const pc = editor.get().doc.pieces.find((p) => p.id === h.piece.id);
+      if (!pc) return null;
+      try {
+        const apex0 = dartApexAt(pc, h, o.dartWidth, 'centro', o.dartDepth, toward ?? undefined);
+        const align = dartAlignFor(h, apex0);
+        if (o.dartMode === 'abrir') {
+          // abrir: a boca vai do ponto clicado até onde ele chega depois do giro
+          const r = dist(h.point, apex0);
+          const th = 2 * Math.asin(Math.min(1, o.dartWidth / (2 * r)));
+          const tan = tangentOnEdge(pc.outline, h.edge, h.t);
+          const sgn = align === 'inicio' ? -1 : 1;
+          const towardSide = { x: h.point.x + tan.x * sgn, y: h.point.y + tan.y * sgn };
+          const rot = (ang: number) => ({ x: apex0.x + (h.point.x - apex0.x) * Math.cos(ang) - (h.point.y - apex0.y) * Math.sin(ang), y: apex0.y + (h.point.x - apex0.x) * Math.sin(ang) + (h.point.y - apex0.y) * Math.cos(ang) });
+          const a1 = rot(th), a2 = rot(-th);
+          const legB = dist(a1, towardSide) < dist(a2, towardSide) ? a1 : a2;
+          return { legA: h.point, legB, apex: apex0 };
+        }
+        const apex = dartApexAt(pc, h, o.dartWidth, align, o.dartDepth, toward ?? undefined);
+        return { ...dartMouth(pc, h, o.dartWidth, align), apex };
+      } catch {
+        return null;
+      }
+    };
+    /** Cria a pence (marcar ou abrir) no ponto da borda; `toward` = para onde aponta (sem perpendicular). */
+    const makeDart = (h: OutlineHit, toward: Vec2 | null) => {
+      const o = opts();
+      const pc = editor.get().doc.pieces.find((p) => p.id === h.piece.id);
+      if (!pc) return;
+      try {
+        const apex0 = dartApexAt(pc, h, o.dartWidth, 'centro', o.dartDepth, toward ?? undefined);
+        const align = dartAlignFor(h, apex0);
+        const style = { kind: o.dartKind, side: o.dartSide };
+        if (o.dartMode === 'abrir') {
+          commitPiece(pc.id, (p) => openDart(p, h, apex0, o.dartWidth, align === 'inicio' ? 'inicio' : 'fim', style), { pieceId: pc.id, vertex: null, edge: null });
+          notify(`Pence aberta: ${fmtLenU(o.dartWidth)} de folga, pivô a ${fmtLenU(dist(apex0, h.point), 0)} · confira a quebra do outro lado do molde`);
+        } else {
+          const apex = dartApexAt(pc, h, o.dartWidth, align, o.dartDepth, toward ?? undefined);
+          commitPiece(pc.id, (p) => createDart(p, h, apex, o.dartWidth, { ...style, align }), { pieceId: pc.id, vertex: null, edge: null });
+          notify(`Pence de ${fmtLenU(o.dartWidth)} × ${fmtLenU(dist(apex, h.point), 0)} criada`);
+        }
+      } catch (err) {
+        fail(err);
+      }
+      overlay.dartGhost = null;
+    };
     canvasApi.viewSize = () => ({ w: view.w, h: view.h });
     canvasApi.toPage = (p: Vec2) => {
       const r = canvas.getBoundingClientRect();
@@ -311,10 +477,11 @@ export function Canvas() {
     const resetPick = () => {
       pick = null;
       overlay.pick = null;
+      overlay.dartLegs = null;
     };
 
     /* ---------------- andar molde ---------------- */
-    let walk: { aId: string; bId: string; A: WalkPath; B: WalkPath; s: number; frozen: boolean; maxS: number } | null = null;
+    let walk: { aId: string; bId: string; aEdge: number; bEdge: number; aFromEnd: boolean; A: WalkPath; B: WalkPath; s: number; frozen: boolean; maxS: number } | null = null;
 
     /** Vértice inicial e sentido a partir do clique numa borda (ponta mais próxima do clique). */
     const walkStartOf = (h: OutlineHit): { start: number; dir: 1 | -1 } => {
@@ -341,7 +508,8 @@ export function Canvas() {
       traveled.push(pointAt(walk.A, walk.s).p);
       overlay.walk = { piece: moved, hideId: pb.id, traveled, contact: pointAt(walk.A, walk.s).p };
       const r = walkReport(pa, walk.A, pb, walk.B, walk.s);
-      walkStore.set({ info: { aName: pa.name, bName: pb.name, frozen: walk.frozen, mirrored, ...r } });
+      const marks = [...walk.A.notches, ...walk.A.corners].filter((m) => m > 0.5 && m <= walk!.maxS + 0.5).sort((x, y) => x - y);
+      walkStore.set({ info: { aName: pa.name, bName: pb.name, frozen: walk.frozen, mirrored, maxS: walk.maxS, marks, contact: pointAt(walk.A, walk.s).p, aCenter: pieceCenter(pa), ...r } });
     };
 
     const walkExit = () => {
@@ -380,10 +548,41 @@ export function Canvas() {
       notify('Molde fixado na posição encostada');
     };
 
+    /** Começa a andar: A pela ponta da borda clicada (ou a outra, se `fromEnd`); B no sentido que encosta sem virar. */
+    const walkSetup = (pa: Piece, aEdge: number, aFromEnd: boolean, pb: Piece, bEdge: number) => {
+      const na = vertices(pa.outline).length, nb = vertices(pb.outline).length;
+      const A = aFromEnd ? walkPath(pa, (aEdge + 1) % na, -1) : walkPath(pa, aEdge, 1);
+      const b1 = walkPath(pb, bEdge, 1), b2 = walkPath(pb, (bEdge + 1) % nb, -1);
+      const B = walkTransform(A, b1, 0).mirrored ? b2 : b1;
+      walk = { aId: pa.id, bId: pb.id, aEdge, bEdge, aFromEnd, A, B, s: 0, frozen: true, maxS: Math.min(A.total, B.total) };
+      walkUpdate();
+      invalidate();
+    };
+    canvasApi.walkInvert = () => {
+      if (!walk) return;
+      const doc = editor.get().doc;
+      const pa = doc.pieces.find((p) => p.id === walk!.aId), pb = doc.pieces.find((p) => p.id === walk!.bId);
+      if (pa && pb) walkSetup(pa, walk.aEdge, !walk.aFromEnd, pb, walk.bEdge);
+    };
+    canvasApi.walkTo = (s: number) => walkSet(s);
+    canvasApi.walkNext = (dir: 1 | -1) => {
+      if (!walk) return;
+      const marks = [0, ...walk.A.notches, ...walk.A.corners, walk.maxS].filter((m) => m <= walk!.maxS + 0.5).sort((x, y) => x - y);
+      walkSet(dir === 1 ? (marks.find((m) => m > walk!.s + 0.5) ?? walk.maxS) : ([...marks].reverse().find((m) => m < walk!.s - 0.5) ?? 0));
+    };
+    /** Ao arrastar, gruda nos piques e cantos de A que estiverem perto. */
+    const walkSnap = (s: number): number => {
+      if (!walk) return s;
+      const tol = 6 / view.z;
+      for (const m of [0, ...walk.A.notches, ...walk.A.corners, walk.maxS]) if (Math.abs(m - s) <= tol) return m;
+      return s;
+    };
+
     const walkSet = (s: number) => {
       if (!walk) return;
       walk.s = Math.max(0, Math.min(walk.maxS, s));
       walkUpdate();
+      invalidate();
       invalidate();
     };
 
@@ -531,35 +730,30 @@ export function Canvas() {
       switch (tool) {
         case 'walk': {
           if (walk) {
-            walk.frozen = !walk.frozen;
-            walkUpdate();
+            // arrastar: o molde B rola pela costura de A acompanhando o mouse
+            walk.frozen = false;
+            walkSet(walkSnap(projectOnPath(walk.A, w, walk.maxS)));
             return;
           }
           const h = hitOutline(w, undefined, 0, pick?.pieceId);
-          if (!h) return notify('Clique sobre a costura de um molde, perto do ponto onde a costura começa', 'error');
+          if (!h) return notify(pick ? 'Clique a costura do outro molde (em qualquer ponto dela)' : 'Clique a costura do molde A, perto da ponta onde a costura começa', 'error');
           if (!pick) {
             pick = { tool, pieceId: h.piece.id, hits: [h] };
             select({ pieceId: h.piece.id, edge: h.edge });
-            notify('Agora clique a costura do outro molde, perto do MESMO ponto inicial');
+            notify('Agora clique a costura do outro molde, em qualquer ponto dela');
             return;
           }
           const a = pick.hits[0]!;
-          const sa = walkStartOf(a);
-          const sb = walkStartOf(h);
-          const A = walkPath(a.piece, sa.start, sa.dir);
-          const B = walkPath(h.piece, sb.start, sb.dir);
-          walk = { aId: a.piece.id, bId: h.piece.id, A, B, s: 0, frozen: false, maxS: Math.min(A.total, B.total) };
+          if (h.piece.id === a.piece.id) return notify('Clique a costura de OUTRO molde', 'error');
           resetPick();
-          walkUpdate();
+          walkSetup(a.piece, a.edge, walkStartOf(a).dir === -1, h.piece, h.edge);
+          notify('Arraste o mouse ao longo da costura para andar o molde · ele gruda nos piques e cantos');
           return;
         }
         case 'seam': {
           const h = hitOutline(w, undefined, 3);
           if (!h) return notify('Clique sobre uma borda do molde', 'error');
-          const mm = alt ? 0 : opts().seamMm;
-          const hem = !alt && opts().seamHem && mm > 0;
-          commitPiece(h.piece.id, (p) => withHem({ ...p, seamByEdge: { ...(p.seamByEdge ?? {}), [String(h.edge)]: mm } }, h.edge, hem), { pieceId: h.piece.id, edge: h.edge, vertex: null });
-          notify(hem ? `Barra de ${fmtLenU(mm)} com cantos espelhados na borda ${h.edge + 1}` : mm ? `Margem de ${fmtLenU(mm)} na borda ${h.edge + 1}` : `Borda ${h.edge + 1} sem margem`);
+          seamDo(h, alt ? 'remover' : 'borda');
           return;
         }
         case 'convert': {
@@ -614,19 +808,30 @@ export function Canvas() {
           if (!pick) {
             const h = pickOnOutline(w);
             if (!h) return notify('Clique na borda onde fica a boca da pence', 'error');
+            if (opts().dartPerp) {
+              makeDart(h, null);
+              return;
+            }
             pick = { tool, pieceId: h.piece.id, hits: [h] };
             select({ pieceId: h.piece.id });
+            notify(opts().dartMode === 'abrir' ? 'Agora clique o pivô (para onde a pence aponta)' : 'Agora clique para onde a pence aponta');
             return;
           }
-          const piece = editor.get().doc.pieces.find((p) => p.id === pick!.pieceId)!;
-          const apex = snap(w).p;
+          makeDart(pick.hits[0] as OutlineHit, snap(w).p);
+          resetPick();
+          return;
+        }
+        case 'innerDart': {
+          const p = pieceAt(w);
+          if (!p) return notify('Clique dentro do molde, no meio da pence', 'error');
+          const o = opts();
+          const c = snap(w).p;
           try {
-            commitPiece(piece.id, (p) => createDart(p, pick!.hits[0]!, apex, opts().dartWidth));
-            notify(`Pence de ${fmtLenU(opts().dartWidth)} × ${fmtLenU(dist(apex, pick.hits[0]!.point), 0)} criada`);
+            commitPiece(p.id, (q) => addInnerDart(q, c, { topMm: o.innerTop, bottomMm: o.innerBottom, widthMm: o.innerWidth, angleDeg: o.innerAngle, marks: o.innerMarks }), { pieceId: p.id, vertex: null, edge: null });
+            notify(`Pence interna ${fmtLen(o.innerTop)} + ${fmtLen(o.innerBottom)} × ${fmtLenU(o.innerWidth)} marcada`);
           } catch (err) {
             fail(err);
           }
-          resetPick();
           return;
         }
         case 'dartTransfer': {
@@ -816,6 +1021,11 @@ export function Canvas() {
             }
           }
         }
+        const di = (sel.darts ?? []).findIndex((d) => dist(d.apex, w) <= tol);
+        if (di >= 0) {
+          drag = { kind: 'dartApex', id: sel.id, index: di, base: editor.get().doc, orig: sel };
+          return;
+        }
         const vi = vertices(sel.outline).findIndex((q) => dist(q, w) <= tol);
         if (vi >= 0) {
           select({ pieceId: sel.id, vertex: vi });
@@ -860,6 +1070,8 @@ export function Canvas() {
 
     /* ---------------- eventos de ponteiro ---------------- */
     const onDown = (e: PointerEvent) => {
+      if (e.button === 2) return; // botão direito: ajustes rápidos (contextmenu)
+      closeQuick();
       canvas.focus();
       const sp = local(e);
       const w = toWorld(view, sp.x, sp.y);
@@ -927,6 +1139,7 @@ export function Canvas() {
       overlay.hoverEdge = null;
       overlay.preview = null;
       overlay.marks = [];
+      overlay.dartGhost = null;
       const free = e.altKey;
 
       if (drag) {
@@ -973,6 +1186,12 @@ export function Canvas() {
             const other = g[drag.end === 0 ? 1 : 0];
             g[drag.end] = e.shiftKey ? constrain45(other, snap(w).p) : snap(w).p;
             replacePiece(drag.base, drag.id, { ...drag.orig, grainline: g });
+            break;
+          }
+          case 'dartApex': {
+            const i = drag.index;
+            const apex = snap(w).p;
+            replacePiece(drag.base, drag.id, { ...drag.orig, darts: drag.orig.darts!.map((d, k) => (k === i ? { ...d, apex } : d)) });
             break;
           }
           case 'rect':
@@ -1046,7 +1265,7 @@ export function Canvas() {
       } else if (s.tool === 'measure' || s.tool === 'rect' || s.tool === 'coordPoint') {
         overlay.snapMark = snap(w).mark;
       } else if (s.tool === 'walk' && walk) {
-        if (!walk.frozen) walkSet(projectOnPath(walk.A, w, walk.maxS));
+        if (!walk.frozen) walkSet(walkSnap(projectOnPath(walk.A, w, walk.maxS)));
       } else if (s.tool === 'parallel') {
         const par = parallelAt(w);
         overlay.preview = par ? flattenPath(par.path) : null;
@@ -1065,9 +1284,27 @@ export function Canvas() {
       } else if (s.tool === 'print' && !spaceDown) {
         const hh = printHandleAt(w);
         canvas.style.cursor = !hh ? 'crosshair' : hh.handle === 'rot' ? 'grab' : resizeCursor(toScreen(view, frameCenter(hh.f)), toScreen(view, hh.p));
+      } else if (s.tool === 'innerDart') {
+        const sn = snap(w);
+        const o = s.opts;
+        const pts = innerDartPoints(sn.p, { topMm: o.innerTop, bottomMm: o.innerBottom, widthMm: o.innerWidth, angleDeg: o.innerAngle });
+        overlay.preview = [...pts, pts[0]];
+        overlay.snapMark = sn.mark;
       } else if (EDGE_TOOLS.has(s.tool)) {
         // Cursor e realce da borda que será usada
-        if (s.tool === 'dart' && pick) overlay.cursor = snap(w).p;
+        if (s.tool === 'dart' && pick) {
+          const h0 = pick.hits[0] as OutlineHit;
+          const g = dartPreview(h0, snap(w).p);
+          overlay.cursor = g?.apex ?? snap(w).p;
+          overlay.dartLegs = g;
+        } else if (s.tool === 'dart' && s.opts.dartPerp) {
+          // ápice perpendicular: mostra a pence inteira que um clique cria
+          const h = pickOnOutline(w);
+          const g = h ? dartPreview(h, null) : null;
+          overlay.cursor = h ? h.point : null;
+          overlay.dartGhost = g ? [g.legA, g.apex, g.legB] : null;
+          if (h && h.t === 0) overlay.snapMark = h.point;
+        }
         else if (s.tool === 'fold' && pick?.hits.length === 2) overlay.cursor = null;
         else {
           const edgeTool = s.tool === 'join' || s.tool === 'unfold' || s.tool === 'seam';
@@ -1083,6 +1320,10 @@ export function Canvas() {
 
     const onUp = (e: PointerEvent) => {
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+      if (walk && !walk.frozen) {
+        walk.frozen = true;
+        walkUpdate();
+      }
       const d = drag;
       drag = null;
       updateCursor();
@@ -1127,6 +1368,7 @@ export function Canvas() {
         case 'vertex':
         case 'handle':
         case 'grain':
+        case 'dartApex':
           endLive(d.base);
           break;
         case 'convert':
@@ -1227,11 +1469,11 @@ export function Canvas() {
       const s = editor.get();
       const step = e.shiftKey ? 10 : 1;
       if (walk) {
-        const marks = [...walk.A.notches, ...walk.A.corners].sort((x, y) => x - y);
         switch (e.key) {
           case 'ArrowRight': case 'ArrowUp': walk.frozen = true; walkSet(walk.s + step); e.preventDefault(); return;
           case 'ArrowLeft': case 'ArrowDown': walk.frozen = true; walkSet(walk.s - step); e.preventDefault(); return;
-          case 'n': case 'N': walk.frozen = true; walkSet(marks.find((m) => m > walk!.s + 0.5) ?? walk.maxS); return;
+          case 'n': case 'N': canvasApi.walkNext(e.shiftKey ? -1 : 1); return;
+          case 'i': case 'I': canvasApi.walkInvert(); return;
           case 'Enter': canvasApi.walkFix(); return;
           case 'Escape': walkExit(); return;
         }
@@ -1246,7 +1488,8 @@ export function Canvas() {
           if (overlay.penPoints.length) finishPen();
           break;
         case 'Escape':
-          if (coordStore.get().pick) coordStore.set({ pick: null });
+          if (quickStore.get().open) closeQuick();
+          else if (coordStore.get().pick) coordStore.set({ pick: null });
           else if (pick) resetPick();
           else if (overlay.penPoints.length) {
             overlay.penPoints = [];
@@ -1322,6 +1565,20 @@ export function Canvas() {
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
     canvas.addEventListener('dblclick', onDblClick);
+    /** Botão direito: ajustes rápidos da ferramenta, parados onde se clicou. */
+    const onContext = (e: MouseEvent) => {
+      e.preventDefault();
+      const sp = local(e as PointerEvent);
+      const w = toWorld(view, sp.x, sp.y);
+      const st = editor.get();
+      if (st.tool === 'select') {
+        const p = pieceAt(w);
+        if (p && !st.multi.includes(p.id)) select({ pieceId: p.id, vertex: null, edge: null });
+      }
+      const onEdge = !!hitOutline(w, undefined, 3, pick?.pieceId);
+      quickStore.set({ open: { w, onEdge, inside: !!pieceAt(w), tool: st.tool } });
+    };
+    canvas.addEventListener('contextmenu', onContext);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('pointerleave', onLeave);
     window.addEventListener('keydown', onKeyDown);
@@ -1339,6 +1596,7 @@ export function Canvas() {
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
       canvas.removeEventListener('dblclick', onDblClick);
+      canvas.removeEventListener('contextmenu', onContext);
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('pointerleave', onLeave);
       window.removeEventListener('keydown', onKeyDown);
@@ -1350,6 +1608,8 @@ export function Canvas() {
     <>
       <canvas ref={ref} className="canvas" tabIndex={0} />
       <CoordPopup />
+      <QuickMenu />
+      <WalkPanel />
     </>
   );
 }

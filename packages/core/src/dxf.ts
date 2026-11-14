@@ -13,7 +13,7 @@
 import { type Path, type Vec2, add, bboxOfPoints, cross, dist, flattenPath, flattenWithEdges, lerp, normalize, polyline, scale, signedArea, sub } from './geometry.js';
 import { type Decomposed, closestOnPath, compose, edgeCount, normalizeClosed, notchGeometry, pointOnEdge, vertices } from './edit.js';
 import { type Grading, allSizes } from './grading.js';
-import { type Piece, type PatternDocument, cutLine, edgeSeam } from './pattern.js';
+import { type Piece, type PatternDocument, cutLine, edgeSeam, sewLine } from './pattern.js';
 import { dartGeometry, isSmoothVertex } from './modelagem.js';
 import { simplifyPolyline } from './precisao.js';
 import { fitCubics } from './fit.js';
@@ -137,7 +137,7 @@ function writePieceBlock(w: DxfWriter, piece: Piece, name: string, size: string,
 
   const cut = cutLine(piece, tol);
   const seam = hasSeam(piece);
-  const sew = seam ? flattenPath(piece.outline, tol) : null;
+  const sew = seam ? sewLine(piece, tol) : null;
   w.polyline('1', cut, true);
   if (sew) w.polyline('14', sew, true);
   // pontos de canto/curva (no contorno base — linha de corte quando não há margem, senão costura)
@@ -153,6 +153,7 @@ function writePieceBlock(w: DxfWriter, piece: Piece, name: string, size: string,
   if (piece.grainline) w.line('7', piece.grainline[0], piece.grainline[1]);
   for (const path of piece.internals) w.polyline('8', flattenPath(path, tol), path.closed);
   for (const d of piece.darts ?? []) {
+    if (d.kind === 'recortada') continue; // as pernas já são a linha de corte
     const g = dartGeometry(piece, d);
     w.polyline('8', [g.legA, g.apex, g.legB], false);
     const mouth = lerp(g.legA, g.legB, 0.5);

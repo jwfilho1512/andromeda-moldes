@@ -6,7 +6,7 @@ export type Tool =
   | 'select' | 'pan'
   | 'pen' | 'curve' | 'rect' | 'internal'
   | 'convert' | 'addPoint' | 'removePoint'
-  | 'dart' | 'dartTransfer' | 'cut' | 'join' | 'fold' | 'unfold' | 'pleat' | 'spread' | 'spreadRadial'
+  | 'dart' | 'innerDart' | 'dartTransfer' | 'cut' | 'join' | 'fold' | 'unfold' | 'pleat' | 'spread' | 'spreadRadial'
   | 'walk'
   | 'seam'
   | 'parallel'
@@ -22,6 +22,26 @@ export type LenUnit = 'mm' | 'cm' | 'pol';
 /** Opções das ferramentas (barra de controle). Valores em mm. */
 export interface ToolOpts {
   dartWidth: number;
+  /** Tipo da pence nova: só marcar, com bico ou recortada. */
+  dartKind: 'marcada' | 'bico' | 'recortada';
+  /** Lado para onde a pence deita (bico). */
+  dartSide: 1 | -1;
+  /** Boca da pence em relação ao ponto clicado (olhando do ápice para a borda). */
+  dartAlign: 'esquerda' | 'centro' | 'direita';
+  /** Marcar = a pence tira da borda; abrir = gira o molde pelo pivô e acrescenta a folga (Audaces). */
+  dartMode: 'marcar' | 'abrir';
+  /** Margem para fora (contorno = costura) ou para dentro (contorno = corte). */
+  seamDir: 'fora' | 'dentro';
+  /** Profundidade da pence (mm, da boca ao ápice). */
+  dartDepth: number;
+  /** Ápice reto para dentro da borda: um clique só cria a pence. */
+  dartPerp: boolean;
+  /** Pence interna (losango): alturas de cima/baixo, largura, giro e marcação. */
+  innerTop: number;
+  innerBottom: number;
+  innerWidth: number;
+  innerAngle: number;
+  innerMarks: 'linhas' | 'piques' | 'ambos';
   cutSeam: number;
   pleatDepth: number;
   /** Prega: faca, macho ou fêmea. */
@@ -102,6 +122,8 @@ export interface EditorState {
   /** Área de trabalho ativa. */
   workspace: 'modelagem' | 'risco';
   snap: SnapOpts;
+  /** Pontos que acabaram de ser criados (destacados até a próxima ação). */
+  fresh: { x: number; y: number }[];
 }
 
 /** Informações de vista (mudam a cada movimento do mouse — store separado). */
@@ -143,7 +165,7 @@ export const editor = new Store<EditorState>({
   past: [],
   future: [],
   message: null,
-  opts: { dartWidth: 30, cutSeam: 0, pleatDepth: 30, pleatKind: 'faca', pleatDir: 1, pleatTaper: false, pleatDepthEnd: 50, pleatTrue: true, spreadMm: 40, notchDepth: 5, seamMm: 10, seamHem: false, parallelMm: 10, measureMode: 'clique', measureDistMm: 50, divideN: 2, rotateDeg: 15 },
+  opts: { dartWidth: 30, dartKind: 'bico', dartSide: -1, dartAlign: 'esquerda', dartMode: 'marcar', seamDir: 'fora', dartDepth: 120, dartPerp: true, innerTop: 140, innerBottom: 100, innerWidth: 30, innerAngle: 0, innerMarks: 'ambos', cutSeam: 0, pleatDepth: 30, pleatKind: 'faca', pleatDir: 1, pleatTaper: false, pleatDepthEnd: 50, pleatTrue: true, spreadMm: 40, notchDepth: 5, seamMm: 10, seamHem: false, parallelMm: 10, measureMode: 'clique', measureDistMm: 50, divideN: 2, rotateDeg: 15 },
   snap: { ponto: true, meio: true, intersecao: true, perpendicular: true, borda: true, alinhamento: true, guias: true },
   theme: loadTheme(),
   unit: loadUnit(),
@@ -154,6 +176,7 @@ export const editor = new Store<EditorState>({
   gradeDefault: { sizes: ['PP', 'P', 'M', 'G', 'GG'], base: 2 },
   ruleClipboard: null,
   workspace: 'modelagem',
+  fresh: [],
 });
 
 function loadUnit(): LenUnit {
@@ -253,6 +276,11 @@ export interface WalkInfo {
   cornerDiff: number | null;
   notchPairs: { a: number; b: number; diff: number }[];
   startAngleDeg: number;
+  /** Até onde dá para andar (mm), piques e cantos de A no caminho, ponto de contato e centro de A. */
+  maxS: number;
+  marks: number[];
+  contact: { x: number; y: number };
+  aCenter: { x: number; y: number };
 }
 export const walkStore = new Store<{ info: WalkInfo | null }>({ info: null });
 
@@ -310,6 +338,7 @@ export function commit(doc: PatternDocument, selection?: Selection, multi?: stri
     const sel = validSelection(doc, selection ?? s.selection);
     return {
       doc,
+      fresh: newPoints(s.doc, doc),
       past: [...s.past.slice(-HISTORY_LIMIT + 1), s.doc],
       future: [],
       dirty: true,
@@ -317,6 +346,24 @@ export function commit(doc: PatternDocument, selection?: Selection, multi?: stri
       multi: syncMulti(doc, sel, multi ?? s.multi),
     };
   });
+}
+
+/**
+ * Pontos novos (cantos do contorno e pontos internos) de uma alteração pequena — o ponto criado
+ * fica destacado na hora, em qualquer ferramenta. Mudanças grandes (cortar, dobrar…) não destacam.
+ */
+function newPoints(before: PatternDocument, after: PatternDocument): { x: number; y: number }[] {
+  const old = new Map(before.pieces.map((p) => [p.id, p]));
+  const out: { x: number; y: number }[] = [];
+  for (const p of after.pieces) {
+    const q = old.get(p.id);
+    if (!q || q === p) continue;
+    const had = [...vertices(q.outline), ...(q.drills ?? [])];
+    for (const v of [...vertices(p.outline), ...(p.drills ?? [])]) {
+      if (!had.some((h) => Math.abs(h.x - v.x) < 1e-6 && Math.abs(h.y - v.y) < 1e-6)) out.push(v);
+    }
+  }
+  return out.length <= 12 ? out : [];
 }
 
 /** Mantém a lista da seleção múltipla coerente com a seleção simples e com o documento. */
@@ -366,7 +413,7 @@ export function commitPiece(id: string, f: (p: Piece) => Piece, selection?: Sele
 
 /** Atualização ao vivo durante arraste (sem histórico); feche com endLive(base). */
 export function liveUpdate(doc: PatternDocument): void {
-  editor.set({ doc });
+  editor.set((s) => (s.fresh.length ? { doc, fresh: [] } : { doc }));
 }
 
 export function endLive(base: PatternDocument): void {

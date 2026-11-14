@@ -1,5 +1,5 @@
 import { type BBox, type Placement, type Vec2, IDENTITY, add, applyPlacement, bboxOfPoints, flattenPath, normalize, scale, unionBBox } from './geometry.js';
-import { type Piece, cutLine, edgeSeam } from './pattern.js';
+import { type Piece, cutLine, edgeSeam, sewLine } from './pattern.js';
 import { notchGeometry } from './edit.js';
 import { dartGeometry } from './modelagem.js';
 
@@ -49,7 +49,7 @@ export function addPiece(job: PlotJob, piece: Piece, opts: PlotPieceOptions = {}
   job.strokes.push({ points: cut, closed: true, pen: 1 });
 
   if ((piece.seamAllowanceMm > 0 || Object.values(piece.seamByEdge ?? {}).some((d) => d > 0)) && opts.showSewLine !== false) {
-    job.strokes.push({ points: place(flattenPath(piece.outline)), closed: true, pen: 2 });
+    job.strokes.push({ points: place(sewLine(piece)), closed: true, pen: 2 });
   }
   for (const path of piece.internals) {
     job.strokes.push({ points: place(flattenPath(path)), closed: path.closed, pen: 2 });
@@ -76,6 +76,7 @@ export function addPiece(job: PlotJob, piece: Piece, opts: PlotPieceOptions = {}
 
   // Pences: pernas, piques nas pernas e furo 1 cm antes do ápice.
   for (const d of piece.darts ?? []) {
+    if (d.kind === 'recortada') continue; // as pernas já são a linha de corte
     const g = dartGeometry(piece, d);
     job.strokes.push({ points: place([g.legA, g.apex, g.legB]), closed: false, pen: 2 });
     for (const leg of [g.legA, g.legB]) {
