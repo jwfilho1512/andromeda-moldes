@@ -4,6 +4,7 @@ import type { FileRef } from '../platform';
 
 export type Tool =
   | 'select' | 'pan'
+  | 'cPoint' | 'cLine' | 'cCurve' | 'cRect' | 'extract'
   | 'pen' | 'curve' | 'rect' | 'internal'
   | 'convert' | 'addPoint' | 'removePoint'
   | 'dart' | 'innerDart' | 'dartTransfer' | 'cut' | 'join' | 'fold' | 'unfold' | 'pleat' | 'spread' | 'spreadRadial'

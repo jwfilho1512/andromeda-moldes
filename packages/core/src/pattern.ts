@@ -25,6 +25,7 @@ import type { Grading } from './grading.js';
 import type { PiecePrint } from './estampa-frame.js';
 import type { Artwork } from './estampa.js';
 import type { MarkerDoc } from './marker.js';
+import type { Construction } from './construcao.js';
 
 /**
  * Pique (notch): marca de encontro na borda do molde.
@@ -119,6 +120,8 @@ export interface PatternDocument {
   guides?: { x: number[]; y: number[] };
   /** Imagens das estampas (referenciadas pelos moldes). */
   artworks?: Artwork[];
+  /** Construção: pontos, retas e curvas soltas, de onde os moldes são extraídos. */
+  construction?: Construction;
 }
 
 export const FILE_EXTENSION = '.ctx';

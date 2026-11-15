@@ -24,6 +24,11 @@ import {
   IconVectorSpline,
   IconPhoto,
   IconCrosshair,
+  IconPoint,
+  IconLine,
+  IconWaveSine,
+  IconSquareDashed,
+  IconShape2,
 } from '@tabler/icons-react';
 import type { Tool } from './store';
 import { IconCavas, IconPenceInterna } from './icons';
@@ -33,7 +38,7 @@ export interface ToolDef {
   label: string;
   /** Tecla de atalho (sem modificador). */
   key: string;
-  group: 'Seleção' | 'Desenho' | 'Pontos e curvas' | 'Moldes' | 'Marcações e medidas';
+  group: 'Seleção' | 'Construção' | 'Desenho' | 'Pontos e curvas' | 'Moldes' | 'Marcações e medidas';
   icon: Icon;
   /** Passos mostrados na barra de status. */
   hint: string;
@@ -43,6 +48,11 @@ export const TOOLS: ToolDef[] = [
   { id: 'select', label: 'Seleção', key: 'V', group: 'Seleção', icon: IconPointer, hint: 'Clique num molde para selecionar e arrastar · arraste pontos e alças (Alt: alça independente) · setas movem 1 mm' },
   { id: 'pan', label: 'Mão (mover vista)', key: 'H', group: 'Seleção', icon: IconHandStop, hint: 'Arraste para mover a vista · roda do mouse: zoom' },
 
+  { id: 'cPoint', label: 'Ponto por coordenada', key: '1', group: 'Construção', icon: IconPoint, hint: '1) clique o ponto de referência (canto, ponto, meio) · 2) digite Dx/Dy (ou distância e ângulo) na caixa de cima e clique para o lado que quer · duplo clique: ponto bem ali' },
+  { id: 'cLine', label: 'Reta', key: '2', group: 'Construção', icon: IconLine, hint: 'Clique o início e o fim (cria um ponto em cada ponta; gruda em pontos e em 0°/45°/90°) · digite distância e ângulo na caixa de cima · Esc termina · botão direito na reta: transformar em curva' },
+  { id: 'cCurve', label: 'Curva', key: '3', group: 'Construção', icon: IconWaveSine, hint: 'Clique os pontos por onde a curva passa (o perímetro aparece na caixa) · Enter ou duplo clique termina · Backspace volta um ponto · Esc cancela' },
+  { id: 'cRect', label: 'Retângulo base', key: '4', group: 'Construção', icon: IconSquareDashed, hint: 'Clique um canto e digite Dx (largura) e Dy (altura) na caixa de cima · clique para o lado que quer' },
+  { id: 'extract', label: 'Extrair molde', key: '5', group: 'Construção', icon: IconShape2, hint: 'Clique dentro da área fechada pelas linhas · Shift+clique junta outras partes · Enter (ou duplo clique) cria o molde' },
   { id: 'pen', label: 'Reta / polígono', key: 'P', group: 'Desenho', icon: IconPolygon, hint: 'Clique os cantos · Shift: 45° · digite distância e ângulo embaixo · clique no 1º ponto ou Enter fecha' },
   { id: 'curve', label: 'Curvatura', key: 'C', group: 'Desenho', icon: IconVectorSpline, hint: 'Clique os pontos: a curva passa por eles · Alt+clique = ponto de canto · clique no 1º ponto ou Enter fecha o molde' },
   { id: 'rect', label: 'Retângulo', key: 'R', group: 'Desenho', icon: IconSquare, hint: 'Arraste para desenhar · ou "Novo retângulo exato" no painel' },

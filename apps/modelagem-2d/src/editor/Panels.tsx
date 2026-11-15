@@ -60,6 +60,8 @@ import {
 import { type EdgeRef, type LenUnit, type Theme, type WalkInfo, UNIT_LABEL, UNIT_MM, fmtLen, fmtLenU, fromUnit, notify, parseLen, setUnit, toUnit, unitDigits, unitLabel, commit, commitPiece, editor, toggleSelected, withHem, fmtInput, fmtMm, parseNum, select, setOpt, setTheme, useEditor, useViewInfo, useWalk } from './store';
 import { type AlignMode, addPieceFromOutline, alignSelection, arrangeAll, deletePiece, deleteSelection, distributeSelection, duplicateSelection, invertSelection, mirrorPiece, mirrorPieceH, mirrorSelection, rotatePiece, rotateSelection, selectAll, setTool, toggleGrainline } from './actions';
 import { pieceGeom, sizeColor } from './render';
+import { CoordBox } from './CoordBox';
+import { clearConstruction, resetOp } from './construction';
 import { canvasApi } from './Canvas';
 import { DEFAULT_PX_PER_MM, getPxPerMm, setPxPerMm } from './calibration';
 import { LibraryDialog } from './Library';
@@ -302,6 +304,22 @@ export function ToolOptions() {
   const o = s.opts;
   let options: ReactNode = null;
   switch (s.tool) {
+    case 'cPoint':
+    case 'cLine':
+    case 'cCurve':
+    case 'cRect':
+      options = <CoordBox tool={s.tool} />;
+      break;
+    case 'extract':
+      options = (
+        <>
+          <span className="muted">clique dentro da área fechada · Shift+clique junta outra parte</span>
+          <button className="primary" onClick={() => canvasApi.consEnter()}>Criar molde (Enter)</button>
+          <button className="ghost" onClick={() => resetOp()}>Limpar escolha</button>
+          <button className="ghost" title="Apaga todas as linhas e pontos de construção (os moldes ficam)" onClick={() => window.confirm('Apagar toda a construção? Os moldes extraídos continuam.') && clearConstruction()}>Apagar construção</button>
+        </>
+      );
+      break;
     case 'dart':
       options = (
         <>

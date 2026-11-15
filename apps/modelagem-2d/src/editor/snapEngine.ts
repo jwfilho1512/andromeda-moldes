@@ -4,7 +4,7 @@
  *
  * As bordas ficam num índice espacial (grade de 40 mm) reconstruído só quando o documento muda.
  */
-import { type PatternDocument, type Piece, type Vec2, dist, edgeCount, edgeMidpoint, flattenPath, flattenWithEdges, perpendicularFoot, segmentIntersection, vertices } from '@cad-textil/core';
+import { type Construction, type PatternDocument, type Piece, type Vec2, dist, edgeCount, edgeMidpoint, flattenPath, flattenWithEdges, perpendicularFoot, segmentIntersection, vertices } from '@cad-textil/core';
 import type { SnapOpts } from './store';
 
 interface Seg {
@@ -25,7 +25,16 @@ class SnapIndex {
   mids: { p: Vec2; pieceId: string; edge: number }[] = [];
   buckets = new Map<string, number[]>();
 
-  constructor(pieces: Piece[]) {
+  constructor(pieces: Piece[], construction?: Construction) {
+    // construção: retas e curvas soltas, pontas, pontos e meio das retas
+    for (const l of construction?.lines ?? []) {
+      const pts = flattenPath(l.path, 0.3);
+      for (let i = 0; i + 1 < pts.length; i++) this.addSeg(pts[i]!, pts[i + 1]!, '__c', -1);
+      const ends = [l.path.start, l.path.segments[l.path.segments.length - 1]?.to ?? l.path.start];
+      for (const p of ends) this.verts.push({ p, pieceId: '__c', i: -1 });
+      if (l.path.segments.length === 1 && l.path.segments[0]!.kind === 'line') this.mids.push({ p: { x: (ends[0]!.x + ends[1]!.x) / 2, y: (ends[0]!.y + ends[1]!.y) / 2 }, pieceId: '__c', edge: -1 });
+    }
+    for (const q of construction?.points ?? []) this.verts.push({ p: q.p, pieceId: '__c', i: -1 });
     for (const piece of pieces) {
       const { points, edgeOf } = flattenWithEdges(piece.outline, 0.3);
       for (let i = 0; i < points.length; i++) this.addSeg(points[i]!, points[(i + 1) % points.length]!, piece.id, edgeOf[i]!);
@@ -74,11 +83,11 @@ function nearestOnSeg(p: Vec2, a: Vec2, b: Vec2): Vec2 {
   return { x: a.x + t * dx, y: a.y + t * dy };
 }
 
-let cache: { pieces: Piece[]; hidden: Record<string, boolean>; index: SnapIndex } | null = null;
+let cache: { pieces: Piece[]; cons: Construction | undefined; hidden: Record<string, boolean>; index: SnapIndex } | null = null;
 function indexFor(doc: PatternDocument, hidden: Record<string, boolean>): SnapIndex {
-  if (cache && cache.pieces === doc.pieces && cache.hidden === hidden) return cache.index;
-  const index = new SnapIndex(doc.pieces.filter((p) => !hidden[p.id]));
-  cache = { pieces: doc.pieces, hidden, index };
+  if (cache && cache.pieces === doc.pieces && cache.cons === doc.construction && cache.hidden === hidden) return cache.index;
+  const index = new SnapIndex(doc.pieces.filter((p) => !hidden[p.id]), doc.construction);
+  cache = { pieces: doc.pieces, cons: doc.construction, hidden, index };
   return index;
 }
 
@@ -147,7 +156,7 @@ export function smartSnap(w: Vec2, c: SnapContext): SnapResult {
     for (let i = 0; i < all.length; i++)
       for (let j = i + 1; j < all.length; j++) {
         const A = all[i]!, B = all[j]!;
-        if (A.pieceId === B.pieceId && A.edge >= 0 && B.edge >= 0 && Math.abs(A.idx - B.idx) <= 1) continue;
+        if (A.pieceId === B.pieceId && Math.abs(A.idx - B.idx) <= 1) continue;
         if (dist(A.b, B.a) < 1e-9 || dist(A.a, B.b) < 1e-9) continue;
         const x = segmentIntersection(A.a, A.b, B.a, B.b);
         if (x) pts.push(x);

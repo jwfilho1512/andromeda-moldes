@@ -5,6 +5,7 @@ export * from './edit.js';
 export * from './modelagem.js';
 export * from './pence.js';
 export * from './margem.js';
+export * from './construcao.js';
 export * from './walk.js';
 export * from './grading.js';
 export * from './marker.js';

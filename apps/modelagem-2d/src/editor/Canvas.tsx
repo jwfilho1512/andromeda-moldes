@@ -85,6 +85,8 @@ import { platform } from '../platform';
 import { CoordPopup } from './CoordPopup';
 import { QuickMenu, closeQuick, quickStore } from './QuickMenu';
 import { WalkPanel } from './WalkPanel';
+import { CONS_TOOLS, NO_SEL, withThrough, addCurve, addLine, addPoint as addConsPoint, addRect, connectedTo, consStore, deleteSelected as deleteConsSel, hasSel, resetOp, selectCons, snapAngle, solveTarget } from './construction';
+import { extractRegion, emptyConstruction } from '@cad-textil/core';
 
 /** Ações do menu da margem de costura. */
 export type SeamAction = 'borda' | 'remover' | 'removerCorte' | 'todo' | 'zerar' | 'zerarCorte';
@@ -96,6 +98,7 @@ type Drag =
   | { kind: 'handle'; id: string; edge: number; which: 'c1' | 'c2'; base: PatternDocument; orig: Piece }
   | { kind: 'grain'; id: string; end: 0 | 1; base: PatternDocument; orig: Piece }
   | { kind: 'dartApex'; id: string; index: number; base: PatternDocument; orig: Piece }
+  | { kind: 'consThrough'; lineId: string; index: number; base: PatternDocument }
   | { kind: 'convert'; id: string; index: number; base: PatternDocument; orig: Piece; start: Vec2; moved: boolean }
   | { kind: 'rect'; a: Vec2 }
   | { kind: 'measure'; a: Vec2 }
@@ -145,6 +148,10 @@ export const canvasApi = {
   /** Aplica a ferramenta no ponto clicado com o direito (Enter nos ajustes rápidos). */
   /** Margem de costura: ação na borda clicada com o direito (ou no molde dela). */
   seamAction: (_w: Vec2, _a: SeamAction) => {},
+  /** Construção: Enter na caixa de coordenadas (coloca o ponto / termina a curva / cria o molde). */
+  consEnter: () => {},
+  /** Construção sob um ponto (menu do botão direito). */
+  consHitAt: (_w: Vec2): { kind: 'line' | 'point'; id: string } | null => null,
   applyAt: (_w: Vec2, _mode?: 'clique' | 'distancia' | 'dividir', _distMm?: number) => {},
   /** Tamanho da área do desenho (px). */
   viewSize: (): { w: number; h: number } => ({ w: 0, h: 0 }),
@@ -222,7 +229,13 @@ export function Canvas() {
     canvasApi.fit = () => {
       const s = editor.get();
       const pieces = s.doc.pieces.filter((p) => !s.hidden[p.id]);
-      const bb = pieces.length ? pieces.map((p) => bboxOfPoints(pieceGeom(p).cut)).reduce(unionBBox) : { minX: 0, minY: 0, maxX: 1000, maxY: 600 };
+      // moldes e a construção (linhas e pontos soltos) entram no enquadramento
+      const boxes = [
+        ...pieces.map((p) => bboxOfPoints(pieceGeom(p).cut)),
+        ...(s.doc.construction?.lines ?? []).map((l) => bboxOfPoints(flattenPath(l.path, 1))),
+        ...(s.doc.construction?.points ?? []).map((q) => bboxOfPoints([q.p])),
+      ];
+      const bb = boxes.length ? boxes.reduce(unionBBox) : { minX: 0, minY: 0, maxX: 1000, maxY: 600 };
       const bw = Math.max(bb.maxX - bb.minX, 50);
       const bh = Math.max(bb.maxY - bb.minY, 50);
       setZoom(Math.min((view.w - 80) / bw, (view.h - 80) / bh));
@@ -410,7 +423,7 @@ export function Canvas() {
     const snap = (w: Vec2, exclude?: { id: string; index: number }): { p: Vec2; mark: Vec2 | null } => {
       const s = editor.get();
       const doc = drag && 'base' in drag ? drag.base : s.doc; // durante arrastes, usa o desenho do início
-      const anchor = overlay.penPoints[overlay.penPoints.length - 1] ?? (drag && (drag.kind === 'measure' || drag.kind === 'rect') ? drag.a : null);
+      const anchor = overlay.penPoints[overlay.penPoints.length - 1] ?? (drag && (drag.kind === 'measure' || drag.kind === 'rect') ? drag.a : null) ?? (CONS_TOOLS.has(editor.get().tool) ? consStore.get().anchor : null);
       const r = smartSnap(w, {
         doc,
         hidden: s.hidden,
@@ -622,6 +635,109 @@ export function Canvas() {
       overlay.penPoints.push(p);
       overlay.penCorners.push(false);
       invalidate();
+    };
+
+    /* ---------------- construção ---------------- */
+    /** Alvo do próximo ponto: ímã + valores travados na caixa (+ 0°/45°/90° nas retas). */
+    const consMove = (w: Vec2) => {
+      const tool = editor.get().tool;
+      const cs = consStore.get();
+      if (tool === 'extract') {
+        overlay.cursor = null;
+        return;
+      }
+      const sn = snap(w);
+      overlay.snapMark = sn.mark;
+      let target = sn.p;
+      if (cs.anchor) {
+        const L = cs.locks;
+        const locked = L.dx !== undefined || L.dy !== undefined || L.a !== undefined || L.d !== undefined;
+        target = locked ? solveTarget(cs.anchor, sn.p, L) : !sn.mark && (tool === 'cLine' || tool === 'cCurve') ? snapAngle(cs.anchor, sn.p, 2.5 / Math.max(0.2, view.z)) : sn.p;
+      }
+      consStore.set({ target, cursor: sn.p });
+    };
+    const consClick = (w: Vec2, shift: boolean) => {
+      const tool = editor.get().tool;
+      const cs = consStore.get();
+      if (tool === 'extract') {
+        const lines = (editor.get().doc.construction ?? emptyConstruction()).lines.map((l) => l.path);
+        const insides = shift ? [...cs.insides, w] : [w];
+        const region = extractRegion(lines, insides);
+        if (!region) {
+          notify(shift ? 'Essa parte não fecha com as outras — clique dentro de outra área fechada' : 'Clique dentro de uma área fechada pelas linhas de construção', 'error');
+          return;
+        }
+        consStore.set({ insides, region });
+        notify('Área escolhida · Shift+clique junta outra parte · Enter (ou duplo clique) cria o molde');
+        invalidate();
+        return;
+      }
+      const sn = snap(w);
+      const target = cs.target ?? sn.p;
+      if (!cs.anchor) {
+        if (tool === 'cCurve') consStore.set({ pts: [sn.p], anchor: sn.p, refLabel: overlay.snapKind ?? 'clique livre' });
+        else consStore.set({ anchor: sn.p, refLabel: overlay.snapKind ?? 'clique livre', target: sn.p });
+        return;
+      }
+      if (dist(target, cs.anchor) < 1e-6 && tool !== 'cPoint') return;
+      if (tool === 'cPoint') {
+        addConsPoint(target);
+        notify('Ponto criado · clique outro ponto de referência para o próximo');
+        consStore.set({ anchor: null, locks: {}, target: null });
+      } else if (tool === 'cLine') {
+        addLine(cs.anchor, target);
+        consStore.set({ anchor: target, locks: {}, refLabel: 'fim da reta anterior' });
+      } else if (tool === 'cRect') {
+        addRect(cs.anchor, target);
+        consStore.set({ anchor: null, locks: {}, target: null });
+        notify('Retângulo base criado · agora marque os pontos (tecla 1)');
+      } else if (tool === 'cCurve') {
+        consStore.set({ pts: [...cs.pts, target], anchor: target, locks: {} });
+      }
+      invalidate();
+    };
+    const consEnter = () => {
+      const tool = editor.get().tool;
+      const cs = consStore.get();
+      if (tool === 'extract') {
+        if (!cs.region) return notify('Clique dentro de uma área fechada primeiro', 'error');
+        const piece = addPieceFromOutline(cs.region);
+        resetOp();
+        notify(`${piece.name} extraído da construção · aplique margem (S), pences e fio`);
+        invalidate();
+        return;
+      }
+      if (tool === 'cCurve') {
+        if (cs.pts.length < 2) return notify('A curva precisa de pelo menos 2 pontos', 'error');
+        addCurve(cs.pts);
+        resetOp();
+        invalidate();
+        return;
+      }
+      // Enter = clicar no alvo (valores digitados na caixa)
+      if (cs.anchor && cs.target) {
+        const at = cs.target;
+        consClick({ ...at }, false);
+      }
+    };
+    canvasApi.consEnter = () => {
+      consEnter();
+      invalidate();
+    };
+    const consDouble = (w: Vec2) => {
+      const tool = editor.get().tool;
+      if (tool === 'extract') return consEnter();
+      if (tool === 'cCurve') {
+        const cs = consStore.get();
+        // o duplo clique já somou o último ponto duas vezes
+        const pts = cs.pts.filter((p, i) => i === 0 || dist(p, cs.pts[i - 1]!) > 1e-6);
+        consStore.set({ pts });
+        return consEnter();
+      }
+      if (tool === 'cLine') {
+        resetOp();
+        invalidate();
+      }
     };
 
     const penClick = (w: Vec2, shift: boolean, alt: boolean) => {
@@ -982,9 +1098,54 @@ export function Canvas() {
       drag = { kind: 'print', id: p.id, printId: pr.id, start: w, base: editor.get().doc, orig: p };
     };
 
+    /** Linha ou ponto da construção sob o cursor: o mais perto (o ponto só ganha se estiver bem em cima). */
+    const consHit = (w: Vec2): { kind: 'line' | 'point'; id: string } | null => {
+      const cons = editor.get().doc.construction;
+      if (!cons) return null;
+      const tol = HIT_PX / view.z;
+      let pt: { id: string; d: number } | null = null;
+      for (const q of cons.points) {
+        const d = dist(q.p, w);
+        if (d <= tol * 0.7 && (!pt || d < pt.d)) pt = { id: q.id, d };
+      }
+      let ln: { id: string; d: number } | null = null;
+      for (const l of cons.lines) {
+        const d = closestOnPath(l.path, w).distance;
+        if (d <= tol * 0.8 && (!ln || d < ln.d)) ln = { id: l.id, d };
+      }
+      // um molde selecionado tem prioridade nos pontos dele
+      const selP = selectedPiece();
+      if (selP && vertices(selP.outline).some((q) => dist(q, w) <= tol)) return null;
+      if (pt && (!ln || pt.d <= tol * 0.35)) return { kind: 'point', id: pt.id };
+      if (ln) return { kind: 'line', id: ln.id };
+      return pt ? { kind: 'point', id: pt.id } : null;
+    };
+    canvasApi.consHitAt = (w: Vec2) => consHit(w);
+
     const selectDown = (w: Vec2, alt: boolean, shift: boolean) => {
       const s = editor.get();
       const tol = HIT_PX / view.z;
+      // curva da construção selecionada: arrastar os pontos de passagem muda o formato
+      const csel = consStore.get().sel;
+      if (csel.lines.length === 1 && !shift) {
+        const cl = s.doc.construction?.lines.find((x) => x.id === csel.lines[0] && x.through);
+        const ti = cl ? cl.through!.findIndex((q, k) => k > 0 && k < cl.through!.length - 1 && dist(q, w) <= tol) : -1;
+        if (cl && ti >= 0) {
+          drag = { kind: 'consThrough', lineId: cl.id, index: ti, base: s.doc };
+          return;
+        }
+      }
+      // linhas e pontos da construção: o mais perto do clique (Shift soma; duplo clique pega tudo o que está ligado)
+      const hitC = consHit(w);
+      if (hitC) {
+        selectCons(hitC.kind === 'point' ? { points: [hitC.id] } : { lines: [hitC.id] }, shift);
+        select(null);
+        const n = consStore.get().sel;
+        notify(`${n.lines.length} linha(s) e ${n.points.length} ponto(s) da construção selecionados · Delete apaga · duplo clique pega tudo o que está ligado`);
+        invalidate();
+        return;
+      }
+      if (!shift && hasSel(consStore.get().sel)) consStore.set({ sel: NO_SEL });
       // Shift: põe/tira o molde da seleção; no vazio, caixa que soma à seleção
       if (shift) {
         const p = pieceAt(w);
@@ -1088,6 +1249,7 @@ export function Canvas() {
       } else if (e.button === 0) {
         if (tool === 'select') selectDown(w, e.altKey, e.shiftKey);
         else if (PEN_TOOLS.has(tool)) penClick(w, e.shiftKey, e.altKey);
+        else if (CONS_TOOLS.has(tool)) consClick(w, e.shiftKey);
         else if (tool === 'rect') {
           const a = snap(w).p;
           drag = { kind: 'rect', a };
@@ -1188,6 +1350,15 @@ export function Canvas() {
             replacePiece(drag.base, drag.id, { ...drag.orig, grainline: g });
             break;
           }
+          case 'consThrough': {
+            const dd = drag;
+            const base = dd.base;
+            const l = base.construction?.lines.find((x) => x.id === dd.lineId);
+            if (!l?.through) break;
+            const through = l.through.map((q, k) => (k === dd.index ? snap(w).p : q));
+            liveUpdate({ ...base, construction: withThrough(base.construction!, l.id, through) });
+            break;
+          }
           case 'dartApex': {
             const i = drag.index;
             const apex = snap(w).p;
@@ -1257,6 +1428,8 @@ export function Canvas() {
             break;
           }
         }
+      } else if (CONS_TOOLS.has(s.tool)) {
+        consMove(w);
       } else if (PEN_TOOLS.has(s.tool)) {
         const sn = snap(w);
         const last = overlay.penPoints[overlay.penPoints.length - 1];
@@ -1355,6 +1528,16 @@ export function Canvas() {
           }
           const box = { minX: Math.min(m.a.x, m.b.x), maxX: Math.max(m.a.x, m.b.x), minY: Math.min(m.a.y, m.b.y), maxY: Math.max(m.a.y, m.b.y) };
           const hits = s.doc.pieces.filter((p) => !s.hidden[p.id] && !s.locked[p.id] && polyTouchesBox(pieceGeom(p).cut, box)).map((p) => p.id);
+          // construção: linhas inteiras e pontos dentro da caixa
+          const inBox = (q: Vec2) => q.x >= box.minX && q.x <= box.maxX && q.y >= box.minY && q.y <= box.maxY;
+          const cons = s.doc.construction;
+          if (cons) {
+            const lines = cons.lines.filter((l) => flattenPath(l.path, 1).every(inBox)).map((l) => l.id);
+            const points = cons.points.filter((q) => inBox(q.p)).map((q) => q.id);
+            const prev = consStore.get().sel;
+            consStore.set({ sel: d.add ? { lines: [...new Set([...prev.lines, ...lines])], points: [...new Set([...prev.points, ...points])] } : { lines, points } });
+            if (lines.length + points.length) notify(`${lines.length} linha(s) e ${points.length} ponto(s) da construção selecionados · Delete apaga`);
+          }
           selectMany(d.add ? [...selectedIds(s), ...hits] : hits);
           if (hits.length > 1 || d.add) notify(`${selectedIds().length} molde(s) selecionado(s)`);
           break;
@@ -1369,6 +1552,7 @@ export function Canvas() {
         case 'handle':
         case 'grain':
         case 'dartApex':
+        case 'consThrough':
           endLive(d.base);
           break;
         case 'convert':
@@ -1401,6 +1585,20 @@ export function Canvas() {
       if (PEN_TOOLS.has(s.tool)) {
         finishPen();
         return;
+      }
+      if (CONS_TOOLS.has(s.tool)) {
+        consDouble(w);
+        return;
+      }
+      if (s.tool === 'select') {
+        const h = consHit(w);
+        if (h?.kind === 'line') {
+          selectCons(connectedTo(h.id));
+          const n = consStore.get().sel;
+          notify(`${n.lines.length} linha(s) ligadas e ${n.points.length} ponto(s) selecionados · Delete apaga`);
+          invalidate();
+          return;
+        }
       }
       const sel = selectedPiece(s);
       if (s.tool === 'select' && sel) {
@@ -1486,12 +1684,16 @@ export function Canvas() {
           break;
         case 'Enter':
           if (overlay.penPoints.length) finishPen();
+          else if (CONS_TOOLS.has(s.tool)) consEnter();
           break;
         case 'Escape':
           if (quickStore.get().open) closeQuick();
           else if (coordStore.get().pick) coordStore.set({ pick: null });
           else if (pick) resetPick();
-          else if (overlay.penPoints.length) {
+          else if (CONS_TOOLS.has(s.tool) && (consStore.get().anchor || consStore.get().pts.length || consStore.get().insides.length)) {
+            resetOp();
+            invalidate();
+          } else if (overlay.penPoints.length) {
             overlay.penPoints = [];
             overlay.penCorners = [];
           } else if (overlay.measure) {
@@ -1507,7 +1709,10 @@ export function Canvas() {
           if (overlay.penPoints.length) {
             overlay.penPoints.pop();
             overlay.penCorners.pop();
-          } else deleteSelection();
+          } else if (s.tool === 'cCurve' && consStore.get().pts.length) {
+            const pts = consStore.get().pts.slice(0, -1);
+            consStore.set({ pts, anchor: pts[pts.length - 1] ?? null });
+          } else if (!deleteConsSel()) deleteSelection();
           e.preventDefault();
           break;
         case 'ArrowLeft': nudge(-step, 0); e.preventDefault(); break;
@@ -1576,11 +1781,18 @@ export function Canvas() {
         if (p && !st.multi.includes(p.id)) select({ pieceId: p.id, vertex: null, edge: null });
       }
       const onEdge = !!hitOutline(w, undefined, 3, pick?.pieceId);
-      quickStore.set({ open: { w, onEdge, inside: !!pieceAt(w), tool: st.tool } });
+      const ch = consHit(w);
+      if (ch) {
+        const cur = consStore.get().sel;
+        const already = ch.kind === 'line' ? cur.lines.includes(ch.id) : cur.points.includes(ch.id);
+        if (!already) selectCons(ch.kind === 'point' ? { points: [ch.id] } : { lines: [ch.id] });
+      }
+      quickStore.set({ open: { w, onEdge, inside: !!pieceAt(w), tool: st.tool, cons: ch } });
     };
     canvas.addEventListener('contextmenu', onContext);
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('pointerleave', onLeave);
+    const unsubCons = consStore.subscribe(() => invalidate());
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     updateCursor();
@@ -1590,6 +1802,7 @@ export function Canvas() {
       unsub();
       unsubArt();
       unsubCoord();
+      unsubCons();
       cancelAnimationFrame(frame);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);

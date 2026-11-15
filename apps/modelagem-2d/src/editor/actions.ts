@@ -1,3 +1,4 @@
+import { resetOp } from './construction';
 import {
   type Path,
   type Piece,
@@ -66,6 +67,7 @@ export function addPointAt(p: { x: number; y: number }): { piece: Piece; kind: P
 }
 
 export function setTool(tool: Tool): void {
+  if (editor.get().tool !== tool) resetOp();
   editor.set({ tool, fresh: [] });
 }
 

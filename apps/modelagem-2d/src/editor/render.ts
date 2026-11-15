@@ -26,6 +26,7 @@ import type { EditorState, Theme } from './store';
 import { drawPrints } from '../estampa/images';
 import { at, frameHandles } from '../estampa/handles';
 import { fmtLen, fmtMm, unitLabel } from './store';
+import { CONS_TOOLS, consStore } from './construction';
 
 /* ------------------------------------------------------------------ */
 /* Vista                                                               */
@@ -145,6 +146,7 @@ const PAPER = {
   grain: '#0f766e',
   tool: '#ea580c',
   dart: '#b45309',
+  cons: '#2563eb',
   label: '#3f4450',
   marker: '#ffffff',
 };
@@ -166,6 +168,7 @@ const DARK: typeof PAPER = {
   grain: '#2dd4bf',
   tool: '#fb923c',
   dart: '#fbbf24',
+  cons: '#60a5fa',
   label: '#c4c9d1',
   marker: '#1b1d21',
 };
@@ -924,6 +927,7 @@ export function render(ctx: CanvasRenderingContext2D, v: View, s: EditorState, o
   const arts = artsOf(s.doc.artworks);
   const many = s.multi.length > 1;
   const selSet = new Set(many ? s.multi : s.selection.pieceId ? [s.selection.pieceId] : []);
+  drawConstruction(ctx, v, s);
   for (const p of visible) drawPiece(ctx, v, p, selSet.has(p.id), arts);
   if (s.showGrade) for (const p of visible) if (p.grading) drawNest(ctx, v, p, p.id === s.selection.pieceId && !many ? s.selection.vertex : null);
   const sel = visible.find((p) => p.id === s.selection.pieceId);
@@ -954,8 +958,118 @@ export function render(ctx: CanvasRenderingContext2D, v: View, s: EditorState, o
     const ap = toScreen(v, o.dartGhost[1]!);
     tag(ctx, `pence ${fmtLen(dist(o.dartGhost[0]!, o.dartGhost[2]!))} × ${fmtLen(dist(o.dartGhost[1]!, { x: (o.dartGhost[0]!.x + o.dartGhost[2]!.x) / 2, y: (o.dartGhost[0]!.y + o.dartGhost[2]!.y) / 2 }))} ${unitLabel()}`, { x: ap.x + 12, y: ap.y + 8 });
   }
+  if (CONS_TOOLS.has(s.tool)) drawConsPreview(ctx, v, s.tool);
   if (o.walk) drawWalk(ctx, v, o.walk);
   if (o.coord) drawCoordPick(ctx, v, o.coord);
   drawOverlay(ctx, v, o);
   drawRulers(ctx, v, s.unit === 'pol');
+}
+
+/* ---------------- construção ---------------- */
+
+/** Linhas e pontos da construção (por baixo dos moldes). */
+function drawConstruction(ctx: CanvasRenderingContext2D, v: View, s: EditorState) {
+  const c = s.doc.construction;
+  if (!c || (!c.lines.length && !c.points.length)) return;
+  const sel = consStore.get().sel;
+  ctx.save();
+  ctx.strokeStyle = C.cons;
+  for (const l of c.lines) {
+    ctx.lineWidth = sel.lines.includes(l.id) ? 3 : 1.2;
+    ctx.strokeStyle = sel.lines.includes(l.id) ? C.sel : C.cons;
+    polyPath(ctx, v, flattenPath(l.path, 0.3), false);
+    ctx.stroke();
+  }
+  // curva selecionada: pontos de passagem (o do meio se arrasta)
+  for (const l of c.lines) {
+    if (!l.through || !sel.lines.includes(l.id)) continue;
+    l.through.forEach((q, k) => {
+      if (k === 0 || k === l.through!.length - 1) return;
+      const sp = toScreen(v, q);
+      ctx.fillStyle = C.marker;
+      ctx.strokeStyle = C.sel;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.rect(sp.x - 5, sp.y - 5, 10, 10);
+      ctx.fill();
+      ctx.stroke();
+    });
+  }
+  ctx.fillStyle = C.cons;
+  for (const q of c.points) {
+    const sp = toScreen(v, q.p);
+    ctx.beginPath();
+    ctx.fillStyle = sel.points.includes(q.id) ? C.sel : C.cons;
+    ctx.arc(sp.x, sp.y, sel.points.includes(q.id) ? 5 : 3.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Operação em andamento: referência, alvo e medidas ao vivo. */
+function drawConsPreview(ctx: CanvasRenderingContext2D, v: View, tool: string) {
+  const cs = consStore.get();
+  ctx.save();
+  ctx.strokeStyle = C.tool;
+  ctx.fillStyle = C.tool;
+  ctx.lineWidth = 1.4;
+  if (tool === 'extract') {
+    if (cs.region) {
+      polyPath(ctx, v, flattenPath(cs.region, 0.3), true);
+      ctx.globalAlpha = 0.18;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+  const a = cs.anchor, t = cs.target;
+  if (a) {
+    const sa = toScreen(v, a);
+    ctx.beginPath();
+    ctx.arc(sa.x, sa.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.setLineDash([5, 4]);
+  if (tool === 'cCurve' && cs.pts.length) {
+    const pts = t && (!a || Math.hypot(t.x - a.x, t.y - a.y) > 1e-6) ? [...cs.pts, t] : cs.pts;
+    if (pts.length >= 2) {
+      polyPath(ctx, v, flattenPath(pathThroughPoints(pts.map((p, i) => ({ p, corner: i === 0 || i === pts.length - 1 })), false), 0.3), false);
+      ctx.setLineDash([]);
+      ctx.stroke();
+    }
+    for (const p of cs.pts) {
+      const sp = toScreen(v, p);
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (a && t) {
+    if (tool === 'cLine') polyPath(ctx, v, [a, t], false);
+    else if (tool === 'cRect') polyPath(ctx, v, [a, { x: t.x, y: a.y }, t, { x: a.x, y: t.y }], true);
+    else polyPath(ctx, v, [a, { x: t.x, y: a.y }, t], false);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  if (t && (a || tool === 'cPoint')) {
+    const st = toScreen(v, t);
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(st.x - 6, st.y - 6);
+    ctx.lineTo(st.x + 6, st.y + 6);
+    ctx.moveTo(st.x + 6, st.y - 6);
+    ctx.lineTo(st.x - 6, st.y + 6);
+    ctx.stroke();
+    if (a) {
+      const dx = t.x - a.x, dy = t.y - a.y;
+      const label =
+        tool === 'cLine'
+          ? `${fmtLen(Math.hypot(dx, dy))} ${unitLabel()} · ${fmtMm(((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360, 1)}°`
+          : `${fmtLen(Math.abs(dx))} × ${fmtLen(Math.abs(dy))} ${unitLabel()}`;
+      tag(ctx, label, { x: st.x + 12, y: st.y + 8 });
+    }
+  }
+  ctx.restore();
 }

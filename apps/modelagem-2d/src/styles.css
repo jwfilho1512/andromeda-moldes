@@ -131,7 +131,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   overflow-x: auto;
 }
 .cb-tool { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); white-space: nowrap; }
-.cb-options { display: flex; align-items: center; gap: 8px; }
+.cb-options { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .cb-options .row { gap: 8px; padding: 0; white-space: nowrap; }
 .cb-options label.check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .cb-options .muted { white-space: nowrap; }
@@ -312,7 +312,7 @@ table.rule .num input { width: 64px; }
 .row.info.strong b { font-size: 14px; color: var(--accent); }
 .bad-note { color: var(--danger); font-size: 12px; margin: 6px 0; }
 
-.snap-chips { display: flex; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.snap-chips { display: flex; gap: 2px; min-width: 0; flex-shrink: 1; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
 button.chip { padding: 2px 7px; font-size: 11px; border: none; background: transparent; color: var(--faint); }
 button.chip.on { background: color-mix(in srgb, #d946ef 18%, transparent); color: #d946ef; }
 button.chip:hover { background: var(--panel-3); }
@@ -374,7 +374,8 @@ select.pdf-select { background: var(--panel-2); }
 
 /* ajustes rápidos (botão direito) */
 .quick-menu { position: absolute; z-index: 21; background: var(--panel); border: 1px solid var(--line-2); border-radius: 9px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); padding: 7px 9px 9px; display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
-.quick-menu .qm-title { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.quick-menu .qm-title { display: flex; justify-content: space-between; align-items: center; font-weight: 600; cursor: move; user-select: none; touch-action: none; margin: -7px -9px 0; padding: 7px 9px 4px; border-radius: 9px 9px 0 0; }
+.quick-menu .qm-title:hover { background: var(--panel-2); }
 .quick-menu .qm-title span { display: inline-flex; align-items: center; gap: 5px; }
 .quick-menu .qm-seg { display: flex; }
 .quick-menu .qm-seg button { flex: 1; padding: 3px 4px; font-size: 11.5px; }
@@ -450,3 +451,17 @@ button.xs { padding: 2px 8px; font-size: 11.5px; height: 24px; }
 button.wchip { padding: 2px 7px; font-size: 11px; height: 22px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); border-radius: 5px; }
 button.wchip:hover { color: var(--text); border-color: var(--line-2); }
 button.wchip.on { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+
+/* caixa de coordenadas (construção) */
+.coordbox { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
+.coordbox .cb-ref { color: var(--muted); font-size: 12px; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coordbox .cb-field { display: inline-flex; align-items: center; gap: 3px; padding: 1px 2px 1px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); }
+.coordbox .cb-field.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-bg); }
+.coordbox .cb-field.ro { padding-right: 6px; }
+.coordbox .cb-k { color: var(--muted); font-size: 11.5px; }
+.coordbox input { width: 50px; text-align: right; background: transparent; border: none; color: var(--text); font: inherit; font-weight: 600; padding: 2px 0; }
+.coordbox input:focus { outline: none; }
+.coordbox em { font-style: normal; color: var(--muted); font-size: 11px; }
+.quick-menu .qm-coord .coordbox { flex-direction: column; align-items: stretch; gap: 5px; }
+.quick-menu .qm-coord .cb-field { justify-content: space-between; }
+.quick-menu .qm-coord .cb-field input { width: 90px; }

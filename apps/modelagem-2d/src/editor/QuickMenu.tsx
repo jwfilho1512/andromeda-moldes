@@ -12,6 +12,8 @@ import { canvasApi } from './Canvas';
 import { toolById } from './tools';
 import type { SeamAction } from './Canvas';
 import { ToolOptions } from './Panels';
+import { CoordBox } from './CoordBox';
+import { CONS_TOOLS, addThroughPoint, clearConstruction, connectedTo, consStore, curveToLine, deleteSelected, lineToCurve, resetOp, selectCons, useCons } from './construction';
 
 export interface QuickOpen {
   /** Ponto clicado (mm). */
@@ -21,6 +23,8 @@ export interface QuickOpen {
   /** O clique foi dentro de um molde (pence interna). */
   inside: boolean;
   tool: string;
+  /** Linha ou ponto da construção sob o clique. */
+  cons?: { kind: 'line' | 'point'; id: string } | null;
 }
 export const quickStore = new Store<{ open: QuickOpen | null }>({ open: null });
 export const closeQuick = () => quickStore.get().open && quickStore.set({ open: null });
@@ -67,12 +71,17 @@ function LiveField({ label, value, onLive, kind = 'len', inputRef, min = 0 }: { 
 export function QuickMenu() {
   const q = useSyncExternalStore(quickStore.subscribe, () => quickStore.get().open);
   const s = useEditor();
+  const cs = useCons();
+  const consCount = cs.sel.lines.length + cs.sel.points.length;
+  const consLine = q?.cons?.kind === 'line' ? s.doc.construction?.lines.find((l) => l.id === q.cons!.id) : undefined;
   useViewInfo(); // acompanha zoom e rolagem
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<Mode>('distancia');
   const [distText, setDistText] = useState('');
   const [place, setPlace] = useState<{ x: number; y: number } | null>(null);
+  /** Posição escolhida arrastando pelo título (vale até fechar o menu). */
+  const [moved, setMoved] = useState<{ x: number; y: number } | null>(null);
   const key = q ? `${q.w.x},${q.w.y},${q.tool}` : '';
 
   // abriu: modo de medida (no clique vira distância, só para este Enter) e foco no 1º campo
@@ -82,6 +91,7 @@ export function QuickMenu() {
     setMode(o.measureMode === 'clique' ? 'distancia' : o.measureMode);
     setDistText('');
     setPlace(null);
+    setMoved(null);
     requestAnimationFrame(() => {
       input.current?.focus();
       input.current?.select();
@@ -95,7 +105,7 @@ export function QuickMenu() {
 
   // depois de medir, mantém a janela dentro da área do desenho
   useLayoutEffect(() => {
-    if (!q || !box.current) return;
+    if (!q || !box.current || moved) return;
     const c = canvasApi.toLocal(q.w);
     const vs = canvasApi.viewSize();
     const h = box.current.offsetHeight;
@@ -201,6 +211,51 @@ export function QuickMenu() {
         {q.onEdge && !o.dartPerp && <div className="qm-hint">Depois clique para onde a pence aponta{o.dartMode === 'abrir' ? ' (o pivô)' : ''}.</div>}
       </>
     );
+  } else if (q.cons || CONS_TOOLS.has(tool)) {
+    const sel = consCount;
+    const run = (f: () => void) => {
+      f();
+      closeQuick();
+      canvasApi.focus();
+    };
+    body = (
+      <>
+        {CONS_TOOLS.has(tool) && tool !== 'extract' && (
+          <div className="qm-coord">
+            <CoordBox tool={tool} />
+          </div>
+        )}
+        {tool === 'extract' && <button className="primary" onClick={() => run(() => canvasApi.consEnter())}>Criar molde da área escolhida (Enter)</button>}
+        {(consStore.get().anchor || consStore.get().pts.length > 0) && <button className="ghost" onClick={() => run(() => resetOp())}>Cancelar o que está desenhando (Esc)</button>}
+        {sel > 0 && (
+          <>
+            <div className="qm-group">Construção selecionada ({sel})</div>
+            <div className="qm-buttons">
+              <button className="ghost" onClick={() => run(() => deleteSelected())}>Apagar (Delete)</button>
+              {consLine && !consLine.through && (
+                <button className="ghost" title="A reta vira curva com um ponto no meio: arraste esse ponto (Seleção) para dar o formato" onClick={() => run(() => {
+                  lineToCurve(consLine.id);
+                  selectCons({ lines: [consLine.id] });
+                })}>Transformar em curva</button>
+              )}
+              {consLine?.through && <button className="ghost" title="Mais um ponto de passagem onde você clicou" onClick={() => run(() => addThroughPoint(consLine.id, q.w))}>Pôr ponto na curva aqui</button>}
+              {consLine?.through && <button className="ghost" onClick={() => run(() => curveToLine(consLine.id))}>Transformar em reta</button>}
+              {q.cons?.kind === 'line' && <button className="ghost" onClick={() => run(() => selectCons(connectedTo(q.cons!.id)))}>Selecionar tudo ligado</button>}
+              {q.cons?.kind === 'line' && (
+                <button className="ghost" title="Apaga a linha e tudo o que está ligado a ela (o retângulo inteiro, por exemplo)" onClick={() => run(() => {
+                  selectCons(connectedTo(q.cons!.id));
+                  deleteSelected();
+                })}>Apagar tudo ligado</button>
+              )}
+            </div>
+          </>
+        )}
+        <div className="qm-buttons">
+          <button className="ghost" onClick={() => run(() => window.confirm('Apagar toda a construção? Os moldes extraídos continuam.') && clearConstruction())}>Apagar toda a construção</button>
+        </div>
+        <div className="qm-hint">Na Seleção: clique numa linha seleciona, Shift soma, duplo clique pega tudo o que está ligado, caixa pega o que estiver dentro.</div>
+      </>
+    );
   } else if (tool === 'seam') {
     const run = (a: SeamAction) => {
       closeQuick();
@@ -274,12 +329,32 @@ export function QuickMenu() {
     <div
       ref={box}
       className="quick-menu"
-      style={{ left: place?.x ?? -9999, top: place?.y ?? -9999, width: W }}
+      style={{ left: (moved ?? place)?.x ?? -9999, top: (moved ?? place)?.y ?? -9999, width: W }}
       onPointerDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={onKey}
     >
-      <div className="qm-title">
+      <div
+        className="qm-title"
+        title="Arraste para mover"
+        onPointerDown={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return;
+          e.preventDefault();
+          const start = moved ?? place;
+          if (!start) return;
+          const sx = e.clientX, sy = e.clientY;
+          const vs = canvasApi.viewSize();
+          const h = box.current?.offsetHeight ?? 200;
+          const move = (ev: PointerEvent) =>
+            setMoved({ x: Math.max(0, Math.min(vs.w - 40, start.x + ev.clientX - sx)), y: Math.max(0, Math.min(vs.h - Math.min(h, 40), start.y + ev.clientY - sy)) });
+          const up = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+          };
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', up);
+        }}
+      >
         <span>
           <t.icon size={14} stroke={1.7} /> {t.label}
         </span>
